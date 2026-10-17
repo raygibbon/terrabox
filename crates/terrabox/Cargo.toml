@@ -9,6 +9,10 @@ readme = "README.md"
 keywords = ["terminal", "tui", "console", "ansi"]
 categories = ["command-line-interface"]
 
+[features]
+default = []
+kitty-graphics = []
+
 [dependencies]
 unicode-width = "0.2"
 unicode-segmentation = "1.12"
@@ -19,3 +23,7 @@ libc = "0.2"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Console", "Win32_System_Threading", "Win32_System_IO", "Win32_Storage_FileSystem"] }
 
+
+[[example]]
+name = "kitty-image"
+required-features = ["kitty-graphics"]

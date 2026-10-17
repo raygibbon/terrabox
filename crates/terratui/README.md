@@ -48,7 +48,21 @@ unblock the event loop; messages are delivered on the UI thread. Workers check
 `sender.is_closed()` and are joined in `App::shutdown`. The gallery demonstrates
 this lifecycle without blocking keyboard input. Timers are explicit one-shot
 `Deadline`s, replaceable and cancellable by ID. Animation schedules timers and
-updates cells; advanced transitions and Kitty graphics are planned.
+updates cells; UI transitions remain deferred.
+
+The optional `kitty-graphics` feature forwards to TerraBox and adds
+`widgets::ImageView`. `Desktop::present` coordinates cells and retained image
+requests through the engine. The widget follows layout/resize, releases hidden
+images, suppresses images during menus/modals and displays explanatory fallback
+text when graphics is unconfirmed. No decoder or second graphics backend is
+included. Native Kitty animation remains deferred.
+
+```sh
+cargo run -p terratui --features kitty-graphics --example terratui-image-viewer
+```
+
+See [graphics integration](../../docs/graphics.md) for ownership, clipping and
+manual-loop requirements.
 
 Run `cargo run -p terratui --example terratui-widgets` or
 `cargo run -p terratui --example terratui-desktop` from the workspace.

@@ -70,6 +70,29 @@ impl Group {
     }
 }
 impl Widget for Group {
+    #[cfg(feature = "kitty-graphics")]
+    fn prepare_graphics(&mut self, available: bool) {
+        for (_, widget, _) in &mut self.children {
+            widget.prepare_graphics(available);
+        }
+    }
+    #[cfg(feature = "kitty-graphics")]
+    fn collect_graphics(&self, area: Rect, requests: &mut Vec<terrabox::graphics::ImageRequest>) {
+        for (id, widget, _) in &self.children {
+            if let Some((_, local)) = self.areas.iter().find(|(target, _)| target == id) {
+                let region = Rect::new(
+                    area.x.saturating_add(local.x),
+                    area.y.saturating_add(local.y),
+                    local.width,
+                    local.height,
+                )
+                .intersection(area);
+                if region.width > 0 && region.height > 0 {
+                    widget.collect_graphics(region, requests);
+                }
+            }
+        }
+    }
     fn draw(&mut self, canvas: &mut Canvas<'_>, focused: bool, theme: &Theme) {
         let size = canvas.size();
         self.areas = self

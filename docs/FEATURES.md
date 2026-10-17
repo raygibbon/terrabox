@@ -12,6 +12,11 @@
 | Resize events | Supported | SIGWINCH wake pipe on Unix; native console events on Windows |
 | Compiled terminfo | Supported subset | Standard string capabilities and bounded numeric parameter expansion for cursor position |
 | Small output fallback | Supported | Specification-based VT operations for an explicit compatibility allowlist; system terminfo is preferred |
+| Runtime capability evidence | Supported | Tri-state declarations/replies, explicit bounded cached probes, input replay; silence stays unknown |
+| Static Kitty graphics | Optional | `kitty-graphics`; RGBA8, alpha, bounded resources, cell-aligned placements and cleanup; actual emulator validation pending |
+| Native Kitty animation | Deferred | Separate capability; scheduled static replacement is available |
+| Frame pacing | Supported | Caller-driven FrameClock, elapsed/lateness, pause/resume; no mandatory loop |
+| TerraTUI image widget | Optional | ImageView shares engine backend, follows layout, text fallback and overlay suppression |
 | Controlling terminal connection | Unix | `Terminal::new()` opens `/dev/tty` |
 | Explicit stdio or owned descriptors | Unix | `from_stdio()`, `from_fds()`, `from_tty_path()` |
 | Native Windows console backend | Tested on Windows 11 x64 | Native API checks passed in Windows Terminal and classic Console Host; see [validation report](WINDOWS_VALIDATION.md) for scope and remaining manual checks |

@@ -8,6 +8,7 @@ import ctypes as C
 import os
 from pathlib import Path
 import re
+import sys
 import subprocess
 import tempfile
 import time
@@ -52,7 +53,7 @@ def key(window, name):
     x.XFlush(DISPLAY)
     time.sleep(.15)
 
-def capture(name, args=(), actions=(), extra=None, quit_key="Ctrl+q"):
+def capture(name, args=(), actions=(), extra=None, quit_key="Ctrl+q", animated=False):
     title = f"TerraBox capture {os.getpid()} {name}"
     proc = subprocess.Popen(["xterm", "-xrm", "*allowSendEvents:true",
         "-xrm", "*color4:#163456", "-xrm", "*color6:#36a6a6",
@@ -78,7 +79,54 @@ def capture(name, args=(), actions=(), extra=None, quit_key="Ctrl+q"):
         for action in actions:
             if isinstance(action, float): time.sleep(action)
             else: key(target, action)
-        subprocess.run(["import", "-window", hex(window), str(OUT / f"{name}.png")], check=True)
+        if animated:
+            # Encode successive actual window captures; never synthesize app output.
+            from PIL import Image
+            # Read the actual X window directly to avoid PNG subprocess latency.
+            class XImage(C.Structure):
+                _fields_ = [("width", C.c_int), ("height", C.c_int),
+                    ("xoffset", C.c_int), ("format", C.c_int), ("data", C.c_void_p),
+                    ("byte_order", C.c_int), ("bitmap_unit", C.c_int),
+                    ("bitmap_bit_order", C.c_int), ("bitmap_pad", C.c_int),
+                    ("depth", C.c_int), ("bytes_per_line", C.c_int),
+                    ("bits_per_pixel", C.c_int), ("red_mask", C.c_ulong),
+                    ("green_mask", C.c_ulong), ("blue_mask", C.c_ulong)]
+            x.XGetImage.argtypes = [C.c_void_p, C.c_ulong, C.c_int, C.c_int,
+                C.c_uint, C.c_uint, C.c_ulong, C.c_int]
+            x.XGetImage.restype = C.POINTER(XImage)
+            x.XDestroyImage.argtypes = [C.POINTER(XImage)]
+            geometry = subprocess.check_output(["xwininfo", "-id", hex(window)], text=True)
+            width = int(re.search(r"Width: (\d+)", geometry)[1])
+            height = int(re.search(r"Height: (\d+)", geometry)[1])
+            frames, timestamps = [], []
+            for _ in range(60):
+                target_time = time.monotonic() + .08
+                timestamps.append(time.monotonic())
+                snapshot = x.XGetImage(DISPLAY, window, 0, 0, width, height,
+                                       C.c_ulong(-1).value, 2)
+                if not snapshot:
+                    raise RuntimeError("XGetImage could not capture the animation window")
+                try:
+                    raw = snapshot.contents
+                    if (raw.bits_per_pixel, raw.byte_order, raw.red_mask,
+                        raw.green_mask, raw.blue_mask) != (32, 0, 0xff0000, 0xff00, 0xff):
+                        raise RuntimeError("GIF capture requires a little-endian 32-bit X visual")
+                    pixels = C.string_at(raw.data, raw.bytes_per_line * height)
+                    frames.append(Image.frombytes("RGB", (width, height), pixels,
+                                                   "raw", "BGRX", raw.bytes_per_line))
+                finally:
+                    x.XDestroyImage(snapshot)
+                time.sleep(max(0, target_time - time.monotonic()))
+            palette = frames[0].quantize(colors=64)
+            frames = [frame.quantize(palette=palette, dither=Image.Dither.NONE) for frame in frames]
+            durations = [max(20, round((b - a) * 100) * 10)
+                         for a, b in zip(timestamps, timestamps[1:])]
+            durations.append(durations[-1])
+            frames[0].save(OUT / f"{name}.gif", save_all=True,
+                           append_images=frames[1:], duration=durations, loop=0,
+                           optimize=True, disposal=1)
+        else:
+            subprocess.run(["import", "-window", hex(window), str(OUT / f"{name}.png")], check=True)
         if extra:
             key(target, "F1")
             subprocess.run(["import", "-window", hex(window), str(OUT / extra)], check=True)
@@ -94,13 +142,21 @@ def capture(name, args=(), actions=(), extra=None, quit_key="Ctrl+q"):
 
 try:
     OUT.mkdir(parents=True, exist_ok=True)
-    capture("terratui-desktop", actions=("F10",))
-    with tempfile.TemporaryDirectory(prefix="terrabox-demo-") as folder:
-        fixture = Path(folder)
-        for directory in ["Documents", "Examples", "Projects"]: (fixture / directory).mkdir()
-        for i in range(1, 27): (fixture / f"sample-{i:02}.txt").write_text(f"Sample document {i}\n")
-        capture("terratui-files", args=(fixture,), actions=("Tab", "Down", "Down"), quit_key="F10")
-    capture("terratui-widgets", actions=("F5", .8, "Tab", "Tab"), extra="terratui-dialog.png")
-    capture("terrabox-demo", actions=(.5, "space"), quit_key="Escape")
+    if "--phase3" in sys.argv:
+        # Xterm captures only real text/cell output. Kitty/viewer graphics must
+        # be captured on a compatible host; never substitute a fake image.
+        capture("terminal-capabilities", actions=(.8,), quit_key="Escape")
+        capture("terrabox-animation", actions=(.5,"space"), quit_key="Escape")
+        capture("terrabox-animation", actions=(.3,), quit_key="Escape", animated=True)
+    else:
+        capture("terratui-desktop", actions=("F10",))
+        with tempfile.TemporaryDirectory(prefix="terrabox-demo-") as folder:
+            fixture = Path(folder)
+            for directory in ["Documents", "Examples", "Projects"]: (fixture / directory).mkdir()
+            for i in range(1, 27): (fixture / f"sample-{i:02}.txt").write_text(f"Sample document {i}\n")
+            capture("terratui-files", args=(fixture,), actions=("Tab", "Down", "Down"), quit_key="F10")
+        capture("terratui-widgets", actions=("F5", .8, "Tab", "Tab"), extra="terratui-dialog.png")
+        capture("terrabox-demo", actions=(.5, "space"), quit_key="Escape")
+
 finally:
     x.XCloseDisplay(DISPLAY)

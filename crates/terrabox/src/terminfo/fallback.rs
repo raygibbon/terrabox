@@ -64,6 +64,8 @@ pub(super) fn output(screen: Screen) -> Capabilities {
         style[6].clear();
     }
     Capabilities {
+        colors: None,
+        database: false,
         // InputParser already decodes CSI/SS3 function and navigation keys in
         // both normal and application modes, including Linux VC encodings.
         keys: if screen == Screen::Main {

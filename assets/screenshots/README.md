@@ -34,3 +34,40 @@ no usernames, personal directory names, home paths or real user file listings.
 If a graphical display or tools are unavailable, run the examples manually in
 a 100×30 terminal and capture the terminal window with the platform screenshot
 utility. Do not replace missing captures with fabricated output.
+
+## Phase 3 captures
+
+The existing five captures are preserved. These additional captures are also
+actual xterm windows, with the same font, palette and geometry:
+
+- `terminal-capabilities.png`: statuses and evidence after explicit queries.
+- `terrabox-animation.gif`: 60 successive captures of the actual running cell animation, looping with measured capture timing.
+- `terrabox-animation.png`: retained still of the animation paused with Space.
+
+```sh
+cargo build --workspace --examples --all-features
+python3 scripts/capture-examples.py --phase3
+```
+
+GIF encoding additionally requires Pillow (`PIL`). The capture script does not
+interpolate frames or generate terminal content.
+
+## Graphics captures
+
+No Kitty-capable emulator was available in this environment. Consequently
+`kitty-image.png` and `terratui-image-viewer.png` are deliberately absent.
+The xterm captures do not claim to demonstrate image rendering.
+
+On a compatible machine, open a direct Kitty/Ghostty/WezTerm session at 100×30
+cells using a readable monospace font. Build the examples with `--all-features`.
+Run `target/debug/examples/terminal-capabilities` and check a successful runtime
+Kitty static query. Then run `target/debug/examples/kitty-image`; capture only
+the terminal client area after the procedural image actually renders. Repeat
+with `target/debug/examples/terratui-image-viewer` and its selected image visible.
+Use the OS screenshot utility (or ImageMagick window capture on X11); save the
+client areas under the suggested filenames only after visual verification.
+Follow the [manual checklist](../../docs/terminal-compatibility.md) first.
+Check alpha, cropping, text readability and absence of personal information;
+record emulator/version and dimensions alongside new captures. Do not substitute
+an image composited over terminal text or a fallback-only screenshot for a
+rendered graphics capture.

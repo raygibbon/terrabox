@@ -479,3 +479,26 @@ fn installed_family_databases_decode_their_registered_keys() {
         assert!(!caps.cursor_position(79, 23).unwrap().is_empty());
     }
 }
+
+#[test]
+fn numeric_color_metadata_uses_both_widths_and_ignores_cancelled_values() {
+    for (magic, width) in [(0x11au16, 2usize), (0x21e, 4)] {
+        for value in [256i32, -1, -2] {
+            let mut bytes = Vec::new();
+            for field in [magic, 0, 0, 14, 0, 0] {
+                bytes.extend_from_slice(&field.to_le_bytes());
+            }
+            for index in 0..14 {
+                let number = if index == 13 { value } else { -1 };
+                if width == 2 {
+                    bytes.extend_from_slice(&(number as i16).to_le_bytes());
+                } else {
+                    bytes.extend_from_slice(&number.to_le_bytes());
+                }
+            }
+            let entry = parse_entry(&bytes).unwrap();
+            assert_eq!(entry.colors, u32::try_from(value).ok());
+            assert!(entry.strings.is_empty());
+        }
+    }
+}

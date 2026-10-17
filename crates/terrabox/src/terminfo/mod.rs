@@ -35,6 +35,8 @@ fn key_index(key: Key) -> usize {
 
 #[derive(Clone)]
 pub(crate) struct Capabilities {
+    pub colors: Option<u32>,
+    pub database: bool,
     pub keys: Vec<(Vec<u8>, Key)>,
     pub enter_screen: Vec<u8>,
     pub exit_screen: Vec<u8>,
@@ -76,12 +78,17 @@ impl Capabilities {
             if term.is_empty() {
                 return Err(io::Error::new(io::ErrorKind::NotFound, "TERM is not set"));
             }
-            Self::resolve(&term, find_entry(&term).as_deref())
+            let entry = find_entry(&term);
+            let mut caps = Self::resolve(&term, entry.as_deref())?;
+            caps.colors = entry.and_then(|entry| entry.colors);
+            Ok(caps)
         }
     }
     #[cfg(any(not(windows), test))]
     pub(crate) fn from_entry(db: &[Option<Vec<u8>>]) -> Self {
         let mut result = Self {
+            colors: None,
+            database: true,
             keys: Vec::new(),
             enter_screen: Vec::new(),
             exit_screen: Vec::new(),
@@ -196,7 +203,7 @@ fn valid_term(term: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b"._+-".contains(&b))
 }
 #[cfg(not(windows))]
-fn find_entry(term: &str) -> Option<Vec<Option<Vec<u8>>>> {
+fn find_entry(term: &str) -> Option<Entry> {
     if !valid_term(term) {
         return None;
     }
@@ -236,7 +243,7 @@ fn find_entry(term: &str) -> Option<Vec<Option<Vec<u8>>>> {
     find_entry_in(term, &dirs)
 }
 #[cfg(not(windows))]
-fn find_entry_in(term: &str, dirs: &[PathBuf]) -> Option<Vec<Option<Vec<u8>>>> {
+fn find_entry_in(term: &str, dirs: &[PathBuf]) -> Option<Entry> {
     if !valid_term(term) {
         return None;
     }
@@ -271,7 +278,19 @@ fn read_limited(path: &Path) -> std::io::Result<Vec<u8>> {
     Ok(bytes)
 }
 #[cfg(any(not(windows), test))]
-pub(crate) fn parse_entry(bytes: &[u8]) -> Option<Vec<Option<Vec<u8>>>> {
+pub(crate) struct Entry {
+    strings: Vec<Option<Vec<u8>>>,
+    colors: Option<u32>,
+}
+#[cfg(any(not(windows), test))]
+impl std::ops::Deref for Entry {
+    type Target = [Option<Vec<u8>>];
+    fn deref(&self) -> &Self::Target {
+        &self.strings
+    }
+}
+#[cfg(any(not(windows), test))]
+pub(crate) fn parse_entry(bytes: &[u8]) -> Option<Entry> {
     fn n(bytes: &[u8], off: usize) -> Option<usize> {
         Some(usize::from(u16::from_le_bytes(
             bytes.get(off..off + 2)?.try_into().ok()?,
@@ -318,7 +337,24 @@ pub(crate) fn parse_entry(bytes: &[u8]) -> Option<Vec<Option<Vec<u8>>>> {
         let len = bytes[start..end].iter().position(|b| *b == 0)?;
         result.push(Some(bytes[start..start + len].to_vec()));
     }
-    Some(result)
+    let numbers_at = 12 + names + bools + ((names + bools) & 1);
+    let colors = if ints > 13 {
+        let offset = numbers_at + 13 * int_width;
+        let value = if int_width == 2 {
+            i32::from(i16::from_le_bytes(
+                bytes.get(offset..offset + 2)?.try_into().ok()?,
+            ))
+        } else {
+            i32::from_le_bytes(bytes.get(offset..offset + 4)?.try_into().ok()?)
+        };
+        u32::try_from(value).ok()
+    } else {
+        None
+    };
+    Some(Entry {
+        strings: result,
+        colors,
+    })
 }
 #[cfg(test)]
 mod tests;

@@ -104,6 +104,22 @@ impl<Message> Context<'_, Message> {
     pub fn cancel_timer(&mut self, id: TimerId) {
         self.timers.remove(&id);
     }
+    pub fn capabilities(&self) -> &terrabox::TerminalCapabilities {
+        self.terminal.capabilities()
+    }
+    pub fn probe_capabilities(
+        &mut self,
+        timeout: std::time::Duration,
+    ) -> io::Result<&terrabox::TerminalCapabilities> {
+        self.terminal.probe_capabilities(timeout)
+    }
+    pub fn override_capability(
+        &mut self,
+        feature: terrabox::Capability,
+        support: terrabox::Support,
+    ) {
+        self.terminal.override_capability(feature, support);
+    }
     pub fn size(&self) -> terrabox::Size {
         self.terminal.size()
     }
@@ -236,10 +252,7 @@ impl<Model: App> Application<Model> {
                 break;
             }
             if self.redraw {
-                let surface = self.desktop.render(terminal.size());
-                terminal.draw_surface(&surface, terrabox::Position::default());
-                terminal.hide_cursor();
-                terminal.present()?;
+                self.desktop.present(terminal)?;
                 self.redraw = false;
             }
 

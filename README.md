@@ -8,7 +8,7 @@ no async runtime, ncurses or GUI is required.
 
 | Crate | What it owns |
 |---|---|
-| [`terrabox`](crates/terrabox) | Terminal restoration, input, Unicode cells, colours, clipped drawing, surfaces and changed-row presentation |
+| [`terrabox`](crates/terrabox) | Terminal restoration, input, Unicode cells, colours, surfaces, capability evidence and optional Kitty graphics |
 | [`terratui`](crates/terratui) | Applications, commands, nested focus, menus, editable dialogs, lists, trees, progress, status and deadlines |
 
 ## Screenshots
@@ -34,8 +34,22 @@ sample files in a temporary directory. [Capture instructions](assets/screenshots
 
 ![TerraBox direct renderer](assets/screenshots/terrabox-demo.png)
 
+### Capability report and cell animation
+
+![Actual xterm capability report](assets/screenshots/terminal-capabilities.png)
+
+![Live cell animation captured in xterm](assets/screenshots/terrabox-animation.gif)
+
+Graphics captures require a compatible emulator; this environment has xterm only.
+[Compatible-host capture steps](assets/screenshots/README.md#graphics-captures)
+and the [validation report](docs/phase3-validation.md) describe the remaining checks.
+
 ## Features
 
+- Tri-state capability evidence, explicit bounded probes and application overrides.
+- Optional Kitty RGBA uploads, alpha, placements, replacement and resource cleanup.
+- Caller-driven frame pacing, pause/resume and measured elapsed frame time.
+- Optional TerraTUI ImageView with layout integration and text fallback.
 - Native Unix and Windows backends; RAII terminal restoration on return and unwind.
 - Grapheme-aware cells, atomic wide-glyph clipping, surfaces and region scrolling.
 - Keyboard, mouse, paste and resize input; blocking waits and optional deadlines.
@@ -58,7 +72,8 @@ Application ───────> TerraBox ───> native terminal
 TerraBox has no dependency on TerraTUI. Widgets draw to clipped TerraBox canvases;
 applications own files, documents and business operations. Rendering runs on
 request. Terminal presentation compares changed rows with the previous frame.
-The logical desktop frame is rebuilt on redraw; there is no scene cache.
+The logical desktop cell frame is rebuilt on redraw. Optional image scenes retain
+uploaded resources separately and coordinate placement with cell output.
 
 On Unix, terminal operations come from the installed terminfo database first.
 A small specification-based VT fallback covers documented compatibility names;
@@ -78,6 +93,10 @@ cargo run -p terrabox --example terrabox-demo
 cargo run -p terratui --example terratui-desktop
 cargo run -p terratui --example terratui-files -- .
 cargo run -p terratui --example terratui-widgets
+cargo run -p terrabox --example terminal-capabilities
+cargo run -p terrabox --example terrabox-animation
+cargo run -p terrabox --features kitty-graphics --example kitty-image
+cargo run -p terratui --features kitty-graphics --example terratui-image-viewer
 ```
 
 For a sibling project, add one of these path dependencies:
@@ -92,10 +111,22 @@ terratui = { path = "../terrabox/crates/terratui" }
 Start with the beginner examples in the [engine README](crates/terrabox/README.md)
 and [framework README](crates/terratui/README.md).
 
+Both crates default to no optional features. `kitty-graphics` enables raw RGBA8
+transmission; TerraTUI forwards the feature to TerraBox. Applications own image
+decoding. Unknown or rejected support uses text fallback. Queries are explicit;
+normal rendering does not probe. Detected tmux/Screen sessions block graphics
+pending transport support. Native Kitty animation is deferred; the image demo
+can schedule static replacements. See [graphics and capability API](docs/graphics.md)
+and the [terminal validation checklist](docs/terminal-compatibility.md).
+
 ## Examples
 
 | Example | Interaction |
 |---|---|
+| `terminal-capabilities` | Support and evidence report; Escape quits; resize redraws |
+| `kitty-image` | Feature required; Space/R replaces, D deletes, U shows, C toggles scheduled replacement; Escape quits |
+| `terrabox-animation` | Space pauses, +/- changes frame rate; Escape quits |
+| `terratui-image-viewer` | Feature required; arrows select procedural images, Tab changes focus, F1 help, F2 hides preview, Ctrl+Q quits |
 | `terrabox-demo` | Colour swatches, Unicode, clipped borders, moving cells; Space pauses, Escape quits; resize redraws |
 | `terratui-desktop` | Tab/Shift+Tab selects panels; F10 or Alt+F/E/V/H opens menus; Edit changes workspace name; View changes theme; F1 shows About; Ctrl+Q quits |
 | `terratui-files` | Enter opens a directory, Backspace goes up, arrows/Page/Home/End navigate, Tab switches panels, F3 shows metadata, F10 quits |
@@ -112,30 +143,31 @@ Linux has automated PTY and live xterm checks. The current source also passes
 Windows GNU cross-target checks; this does **not** verify native Windows console
 behavior. Native macOS and Windows runtime validation remain pending. Terminal
 font coverage and support for physical key combinations vary.
-See the [Phase 2 validation report](docs/phase2-validation.md) for exact checks.
+See the [Phase 3 validation report](docs/phase3-validation.md) for current checks
+and the [Phase 2 report](docs/phase2-validation.md) for prior evidence.
 
 ## Development
 
 ```sh
 cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cargo build --workspace
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+cargo build --workspace --all-features
 cargo build --workspace --examples
 python3 scripts/smoke-examples.py       # Unix PTY checks; Linux idle CPU measurement
 cargo run --release -p terrabox --example scroll-bench
 ```
 
 The scroll workload and [measurements](docs/phase2-validation.md) justify limiting
-snapshots to the affected region. No renderer cache or output protocol was added.
+snapshots to the affected region. Optional graphics has a separate resource registry; cell diffing remains unchanged.
 
 ## Roadmap
 
-Next: application adoption, native platform testing, scrollbars, richer tree
-activation, large-menu scrolling and nested submenus when needed. Floating
-windows, graphics and transitions are future work. **Kitty graphics, image
-upload/placement and advanced animation are planned, not implemented.** Current
-animation uses timed cell drawing. [Roadmap](docs/roadmap.md).
+Next: real Kitty/Ghostty/WezTerm rendering validation, native platform tests,
+and separately negotiated Kitty animation. Static graphics and cell pacing are
+implemented. Native image animation, image decoders, Sixel rendering, multiplexer
+forwarding, pixel cropping and UI transitions remain deferred.
+[Roadmap](docs/roadmap.md).
 
 ## License
 

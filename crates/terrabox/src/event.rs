@@ -57,12 +57,14 @@ impl PasteEvent {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
+    /// Bounded terminal protocol response; never decoded as keyboard text.
+    Response(Vec<u8>),
     Key(KeyEvent),
     Resize(Size),
     Mouse(MouseEvent),
     Paste(PasteEvent),
     /// An unknown, malformed, or timed-out sequence. Oversized sequences are
-    /// emitted in chunks of at most 64 bytes, never as ordinary text.
+    /// emitted in chunks of at most 64 bytes (4096 for protocol responses), never as ordinary text.
     UnknownSequence(Vec<u8>),
 }
 
@@ -105,6 +107,8 @@ enum ParseState {
     Registered,
     DiscardSequence,
     Paste,
+    Response,
+    DiscardResponse,
 }
 
 enum RegisteredMatch {
@@ -129,11 +133,16 @@ pub struct InputParser {
     mode: InputMode,
     key_caps: Vec<(Vec<u8>, Key)>,
     registered_prefix_len: usize,
+    responses: bool,
 }
 
 impl InputParser {
     pub fn new() -> Self {
         Self::default()
+    }
+    /// Enable bounded graphics/XTGETTCAP reply parsing for explicit probing.
+    pub fn set_response_parsing(&mut self, enabled: bool) {
+        self.responses = enabled;
     }
     pub fn set_mode(&mut self, mode: InputMode) {
         self.mode = mode;
@@ -179,9 +188,27 @@ impl InputParser {
                 | ParseState::Registered
                 | ParseState::Alt
                 | ParseState::DiscardSequence
+                | ParseState::Response
+                | ParseState::DiscardResponse
         )
     }
     pub fn finish_incomplete_sequence(&mut self) -> Option<Event> {
+        if self.state == ParseState::Response && self.bytes.len() == 2 {
+            self.state = ParseState::Ground;
+            self.responses = false;
+            let result = self.next_event();
+            self.responses = true;
+            return result;
+        }
+        if matches!(
+            self.state,
+            ParseState::Response | ParseState::DiscardResponse
+        ) {
+            self.state = ParseState::Ground;
+            let count = self.bytes.len().min(4096);
+            return (count > 0)
+                .then(|| Event::UnknownSequence(self.bytes.drain(..count).collect()));
+        }
         if !self.pending_sequence() {
             return None;
         }
@@ -213,6 +240,9 @@ impl InputParser {
     }
     pub fn next_event(&mut self) -> Option<Event> {
         loop {
+            if self.state == ParseState::DiscardResponse {
+                return self.discard_response();
+            }
             if self.state == ParseState::DiscardSequence {
                 if let Some(event) = self.discard_sequence() {
                     return Some(event);
@@ -224,6 +254,13 @@ impl InputParser {
             }
             if self.state == ParseState::Paste {
                 return self.parse_paste();
+            }
+            if self.state == ParseState::Response
+                || (self.responses
+                    && self.bytes.front() == Some(&27)
+                    && matches!(self.bytes.get(1), Some(b'_' | b'P')))
+            {
+                return self.parse_response();
             }
             let b = *self.bytes.front()?;
             if b == 0x1b {
@@ -306,6 +343,56 @@ impl InputParser {
             self.state = ParseState::Ground;
             return self.next_key(Modifiers::NONE);
         }
+    }
+    fn parse_response(&mut self) -> Option<Event> {
+        self.state = ParseState::Response;
+        // Replies are small. Bound unterminated or oversized APCs independently
+        // of the key parser and resynchronise at any new escape sequence.
+        let dcs = self.bytes.get(1) == Some(&b'P');
+        let prefix_matches = if dcs {
+            let prefix: Vec<_> = self.bytes.iter().take(5).copied().collect();
+            b"\x1bP0+r".starts_with(&prefix) || b"\x1bP1+r".starts_with(&prefix)
+        } else {
+            self.bytes.len() < 3 || self.bytes[2] == b'G'
+        };
+        if !prefix_matches {
+            self.state = ParseState::Ground;
+            self.responses = false;
+            let result = self.next_event();
+            self.responses = true;
+            return result;
+        }
+        for i in 2..self.bytes.len().min(4096) {
+            if self.bytes[i] == 27
+                && let Some(next) = self.bytes.get(i + 1)
+            {
+                self.state = ParseState::Ground;
+                if *next == b'\\' {
+                    return Some(Event::Response(self.bytes.drain(..i + 2).collect()));
+                }
+                return Some(Event::UnknownSequence(self.bytes.drain(..i).collect()));
+            }
+        }
+        if self.bytes.len() >= 4096 {
+            self.state = ParseState::DiscardResponse;
+            return Some(Event::UnknownSequence(self.bytes.drain(..4096).collect()));
+        }
+        None
+    }
+    fn discard_response(&mut self) -> Option<Event> {
+        for i in 0..self.bytes.len().min(4096) {
+            if self.bytes[i] == 27 {
+                let next = *self.bytes.get(i + 1)?;
+                self.state = ParseState::Ground;
+                let count = if next == b'\\' { i + 2 } else { i };
+                if count == 0 {
+                    return self.next_event();
+                }
+                return Some(Event::UnknownSequence(self.bytes.drain(..count).collect()));
+            }
+        }
+        let count = self.bytes.len().min(4096);
+        (count > 0).then(|| Event::UnknownSequence(self.bytes.drain(..count).collect()))
     }
     fn available(&self) -> Vec<u8> {
         self.bytes.iter().take(MAX_SEQUENCE).copied().collect()
@@ -491,6 +578,13 @@ impl InputParser {
         let params = &seq[2..end];
         let final_byte = seq[end];
         self.drain(end + 1);
+        if self.responses
+            && is_csi
+            && params.starts_with(b"?")
+            && (matches!(final_byte, b'u' | b'c') || final_byte == b'y' && params.ends_with(b"$"))
+        {
+            return Some(Event::Response(seq));
+        }
         if is_csi
             && (final_byte == b'M' || final_byte == b'm')
             && (params.first() == Some(&b'<') || params.contains(&b';'))

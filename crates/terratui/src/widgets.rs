@@ -540,3 +540,8 @@ fn shortcut_label(key: terrabox::KeyEvent) -> String {
     });
     hint
 }
+
+#[cfg(feature = "kitty-graphics")]
+mod image;
+#[cfg(feature = "kitty-graphics")]
+pub use image::ImageView;

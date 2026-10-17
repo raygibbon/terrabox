@@ -33,6 +33,10 @@
 //! # }
 //! ```
 
+mod capabilities;
+#[cfg(feature = "kitty-graphics")]
+pub mod graphics;
+pub use capabilities::{Capability, CapabilityStatus, Evidence, Support, TerminalCapabilities};
 mod buffer;
 mod cell;
 mod color;
@@ -55,4 +59,4 @@ pub use key::{Key, KeyEvent, Modifiers};
 pub use notification::Waker;
 pub use surface::{Canvas, Rect, Surface, text_width};
 pub use terminal::{Position, Size, Terminal};
-pub use timing::Deadline;
+pub use timing::{Deadline, FrameClock, FrameTiming};

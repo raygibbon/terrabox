@@ -2,6 +2,7 @@ use crate::buffer::{Buffer, Slot};
 use crate::platform::{Backend, Wake};
 use crate::terminfo::Capabilities;
 use crate::{Cell, Color, Event, InputMode, InputParser, Style, Surface};
+use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::io;
 use std::time::{Duration, Instant};
@@ -33,6 +34,10 @@ pub struct Terminal {
     clear_style: Style,
     mouse_enabled: bool,
     caps: Capabilities,
+    capabilities: crate::TerminalCapabilities,
+    pending_events: VecDeque<Event>,
+    #[cfg(feature = "kitty-graphics")]
+    graphics: crate::graphics::GraphicsState,
 }
 
 impl Terminal {
@@ -74,7 +79,12 @@ impl Terminal {
         let size = backend.size()?;
         let back = Buffer::new(size);
         let front = back.cells.clone();
+        let capabilities = crate::TerminalCapabilities::new(&caps);
         Ok(Self {
+            capabilities,
+            pending_events: VecDeque::new(),
+            #[cfg(feature = "kitty-graphics")]
+            graphics: crate::graphics::GraphicsState::default(),
             backend,
             back,
             front,
@@ -89,6 +99,171 @@ impl Terminal {
             mouse_enabled: false,
             caps,
         })
+    }
+    #[cfg(feature = "kitty-graphics")]
+    fn require_graphics(&mut self) -> io::Result<()> {
+        if self.suspended {
+            return Err(io::Error::other("terminal is suspended"));
+        }
+        if !self.graphics_available() {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "Kitty graphics is not confirmed or the transport is a multiplexer",
+            ));
+        }
+        self.parser.set_response_parsing(true);
+        Ok(())
+    }
+    #[cfg(feature = "kitty-graphics")]
+    pub fn graphics_available(&self) -> bool {
+        self.capabilities.kitty_graphics.support == crate::Support::Supported
+            && !self.capabilities.multiplexer
+    }
+    #[cfg(feature = "kitty-graphics")]
+    pub fn upload_image(
+        &mut self,
+        image: &crate::graphics::RgbaImage,
+    ) -> io::Result<crate::graphics::ImageId> {
+        self.require_graphics()?;
+        self.graphics
+            .upload(image, |bytes| self.backend.write(bytes))
+    }
+    #[cfg(feature = "kitty-graphics")]
+    pub fn replace_image(
+        &mut self,
+        id: crate::graphics::ImageId,
+        image: &crate::graphics::RgbaImage,
+    ) -> io::Result<()> {
+        self.require_graphics()?;
+        self.graphics
+            .replace(id, image, |bytes| self.backend.write(bytes))
+    }
+    #[cfg(feature = "kitty-graphics")]
+    pub fn place_image(
+        &mut self,
+        id: crate::graphics::ImageId,
+        area: crate::Rect,
+    ) -> io::Result<crate::graphics::PlacementId> {
+        self.require_graphics()?;
+        self.graphics.place(id, area, self.size())
+    }
+    #[cfg(feature = "kitty-graphics")]
+    pub fn move_image(
+        &mut self,
+        id: crate::graphics::PlacementId,
+        area: crate::Rect,
+    ) -> io::Result<()> {
+        self.require_graphics()?;
+        self.graphics.move_placement(id, area, self.size())
+    }
+    #[cfg(feature = "kitty-graphics")]
+    pub fn remove_image_placement(&mut self, id: crate::graphics::PlacementId) -> io::Result<()> {
+        self.graphics.remove_placement(id)
+    }
+    /// Queue deletion of this terminal's image and its placements. Call present.
+    #[cfg(feature = "kitty-graphics")]
+    pub fn delete_image(&mut self, id: crate::graphics::ImageId) -> io::Result<()> {
+        self.graphics.delete(id)
+    }
+    /// Synchronise retained requests. Missing slots release their resources.
+    #[cfg(feature = "kitty-graphics")]
+    pub fn sync_graphics(&mut self, requests: &[crate::graphics::ImageRequest]) -> io::Result<()> {
+        if !requests.is_empty() {
+            self.require_graphics()?;
+        }
+        self.graphics
+            .sync(requests, self.size(), |bytes| self.backend.write(bytes))
+    }
+    /// Release all owned images immediately. Handles become invalid. This also
+    /// happens before suspend, raw output and terminal shutdown.
+    #[cfg(feature = "kitty-graphics")]
+    pub fn clear_graphics(&mut self) -> io::Result<()> {
+        let bytes = self.graphics.cleanup();
+        let result = self.backend.write(&bytes);
+        self.graphics.clear();
+        result
+    }
+    pub fn capabilities(&self) -> &crate::TerminalCapabilities {
+        &self.capabilities
+    }
+    /// Explicit overrides are application assertions, not detection. Multiplexer
+    /// safety restrictions still apply to graphics output.
+    pub fn override_capability(&mut self, feature: crate::Capability, support: crate::Support) {
+        self.capabilities.override_status(feature, support);
+    }
+    /// Explicit, cached probes. Silence remains Unknown. Keyboard/paste/resize
+    /// events received while probing are replayed in their original order.
+    /// Native Windows record input and multiplexers are not queried.
+    pub fn probe_capabilities(
+        &mut self,
+        timeout: Duration,
+    ) -> io::Result<&crate::TerminalCapabilities> {
+        if timeout > Duration::from_secs(2) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "probe timeout exceeds two seconds",
+            ));
+        }
+        if self.suspended {
+            return Err(io::Error::other("terminal is suspended"));
+        }
+        if self.capabilities.probed || self.capabilities.multiplexer {
+            return Ok(&self.capabilities);
+        }
+        self.capabilities.probed = true;
+        #[cfg(unix)]
+        {
+            self.parser.set_response_parsing(true);
+            #[allow(unused_mut)]
+            let mut query =
+                b"\x1b[?1006$p\x1b[?2004$p\x1b[?u\x1b[c\x1bP+q436f\x1b\\\x1bP+q524742\x1b\\"
+                    .to_vec();
+            #[cfg(feature = "kitty-graphics")]
+            {
+                let id = crate::graphics::allocate_id()?;
+                self.capabilities.graphics_query = Some(id);
+                query.extend_from_slice(
+                    format!("\x1b_Ga=q,t=d,f=24,s=1,v=1,i={id};AAAA\x1b\\").as_bytes(),
+                );
+            }
+            if let Err(error) = self.backend.write(&query) {
+                self.capabilities.probed = false;
+                return Err(error);
+            }
+            let deadline = Instant::now()
+                .checked_add(timeout)
+                .ok_or_else(|| io::Error::other("invalid probe deadline"))?;
+            let mut events = VecDeque::new();
+            let mut event_bytes = 0usize;
+            let result: io::Result<()> = (|| {
+                while Instant::now() < deadline {
+                    match self.wait_event_inner(Some(
+                        deadline.saturating_duration_since(Instant::now()),
+                    ))? {
+                        Some(Event::Response(bytes)) if self.capabilities.observe(&bytes) => {}
+                        Some(event) => {
+                            event_bytes += match &event {
+                                Event::Paste(p) => p.bytes.len(),
+                                Event::Response(b) | Event::UnknownSequence(b) => b.len(),
+                                _ => 32,
+                            };
+                            events.push_back(event);
+                            // Stop waiting early under input floods; replay buffered events
+                            // and leave remaining bytes in the parser/OS queue.
+                            if events.len() >= 4096 || event_bytes >= 1024 * 1024 {
+                                break;
+                            }
+                        }
+                        None => {}
+                    }
+                }
+                Ok(())
+            })();
+            self.pending_events.extend(events);
+            result?;
+        }
+        self.capabilities.finish_probe();
+        Ok(&self.capabilities)
     }
     /// Wake a blocking `wait_event` from another thread.
     pub fn waker(&self) -> crate::Waker {
@@ -118,12 +293,16 @@ impl Terminal {
     }
     /// Clear the physical screen and force the next `present` to redraw it.
     pub fn clear_screen(&mut self) -> io::Result<()> {
+        #[cfg(feature = "kitty-graphics")]
+        self.graphics.resize();
         self.invalid = true;
         self.backend.clear_screen()?;
         Ok(())
     }
     /// Send bytes directly to the terminal. The next presentation repaints the screen.
     pub fn send_raw(&mut self, bytes: &[u8]) -> io::Result<()> {
+        #[cfg(feature = "kitty-graphics")]
+        self.clear_graphics()?;
         self.invalid = true;
         self.backend.write(bytes)?;
         Ok(())
@@ -208,9 +387,23 @@ impl Terminal {
         if self.suspended {
             return Ok(None);
         }
+        if let Some(event) = self.pending_events.pop_front() {
+            return Ok(Some(event));
+        }
+        self.wait_event_inner(timeout)
+    }
+    fn wait_event_inner(&mut self, timeout: Option<Duration>) -> io::Result<Option<Event>> {
+        if self.suspended {
+            return Ok(None);
+        }
         let deadline = timeout.and_then(|d| Instant::now().checked_add(d));
         loop {
             if let Some(event) = self.parser.next_event() {
+                if let Event::Response(bytes) = &event {
+                    self.capabilities.observe(bytes);
+                    #[cfg(feature = "kitty-graphics")]
+                    self.graphics.reject(bytes);
+                }
                 self.escape_since = None;
                 self.sequence_since = None;
                 return Ok(Some(event));
@@ -268,6 +461,8 @@ impl Terminal {
                 Wake::Resize => {
                     let size = self.backend.size()?;
                     if size != self.back.size {
+                        #[cfg(feature = "kitty-graphics")]
+                        self.graphics.resize();
                         self.back.resize(size);
                         self.back.clear_with_style(self.clear_style);
                         self.front = self.back.cells.clone();
@@ -301,8 +496,12 @@ impl Terminal {
     }
     /// Restore cooked mode and the original screen before running another program.
     pub fn suspend(&mut self) -> io::Result<()> {
+        #[cfg(feature = "kitty-graphics")]
+        let cleanup = self.clear_graphics();
         let result = self.backend.suspend();
         self.suspended = !self.backend.is_active();
+        #[cfg(feature = "kitty-graphics")]
+        cleanup?;
         result
     }
     /// Run a child on the real terminal, restoring this terminal even when
@@ -344,6 +543,9 @@ impl Terminal {
             return Err(io::Error::other("terminal is suspended"));
         }
         let rows = self.back.dirty_rows(&self.front, self.invalid);
+        #[cfg(feature = "kitty-graphics")]
+        let mut out = self.graphics.prefix();
+        #[cfg(not(feature = "kitty-graphics"))]
         let mut out = Vec::new();
         let width = usize::from(self.back.size.width);
         for y in rows {
@@ -362,14 +564,30 @@ impl Terminal {
             }
         }
         out.extend_from_slice(&self.caps.reset);
+        #[cfg(feature = "kitty-graphics")]
+        out.extend(
+            self.graphics
+                .suffix(self.invalid, |x, y| self.caps.cursor_position(x, y))?,
+        );
         append_cursor(&mut out, self.cursor, &self.caps)?;
         if let Err(error) = self.backend.write(&out) {
             self.invalid = true;
             return Err(error);
         }
+        #[cfg(feature = "kitty-graphics")]
+        self.graphics.commit();
         self.front.clone_from(&self.back.cells);
         self.invalid = false;
         Ok(())
+    }
+}
+
+impl Drop for Terminal {
+    fn drop(&mut self) {
+        #[cfg(feature = "kitty-graphics")]
+        if !self.suspended {
+            let _ = self.backend.write(&self.graphics.cleanup());
+        }
     }
 }
 

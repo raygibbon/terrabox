@@ -43,5 +43,19 @@ and thread-safe. Store messages separately, then wake after enqueueing them.
 The convenience `read_event` keeps waiting through notifications.
 
 This engine does not manage application lifecycle callbacks, widgets or focus.
-Cell animation can use `Deadline` and timed waits; Kitty graphics, image
-placement and advanced animation are planned and are not implemented.
+Cell animation can use `Deadline`, `FrameClock` and timed waits. Inspect
+`Terminal::capabilities()` and explicitly call `probe_capabilities` for bounded,
+cached runtime evidence. Silence stays unknown; unrelated input is replayed.
+
+Enable `kitty-graphics` for optional raw RGBA8 upload, placement, replacement and
+cleanup. No decoder is included. Graphics requires confirmed support and a direct
+transport; detected tmux/Screen connections are blocked. Native Kitty animation
+is deferred; static replacement can be scheduled explicitly. See
+[graphics guide](../../docs/graphics.md) and
+[compatibility checklist](../../docs/terminal-compatibility.md).
+
+```sh
+cargo run -p terrabox --example terminal-capabilities
+cargo run -p terrabox --example terrabox-animation
+cargo run -p terrabox --features kitty-graphics --example kitty-image
+```

@@ -126,23 +126,19 @@ before dispatch, and redraw is requested explicitly. No periodic tick exists by
 default. A cell animation schedules its next engine Deadline and changes cells.
 UI easing/transitions will belong in TerraTUI; do not mix them into Terminal.
 
-## Optional graphics plan
+## Optional graphics
 
-Kitty implementation is deferred and adds no dependency to the MVP. Introduce
-an opt-in `kitty-graphics` feature only with protocol and terminal tests. Model
-graphics support and animation support independently as unknown/supported/
-unsupported. A TERM string alone is insufficient evidence. Probe through a
-bounded request/reply exchange that does not consume keyboard input; handle
-multiplexers and timeouts explicitly.
+The `kitty-graphics` feature adds a terminal-owned resource registry beside the
+cell buffers. Explicit bounded probes report tri-state evidence and preserve
+unrelated events. Static RGBA uploads, staged deletions/placements and final
+cursor restoration share the terminal output path. Retained widget requests
+reuse uploaded images; menus/modals suppress the image scene. No decoder,
+mandatory tick or second backend is introduced.
 
-The future API owns image/placement IDs, bounded chunked transmission, image
-formats and alpha, placement/deletion lifetimes, clipping, resize re-placement
-and cleanup on suspend/drop. Animation adds frame upload, durations and control
-operations only after separate negotiation. Unsupported/unknown graphics uses
-application-selected text/cell placeholders; supported graphics without native
-animation uses scheduled static placements only if the application opts in.
-No silent graphics output on unsupported terminals. Sixel can be another
-optional protocol later; no general plugin system or desktop backend is needed.
+See the [Phase 3 design audit](phase3-architecture.md) and
+[graphics guide](graphics.md) for lifecycle, bounds and transport policy.
+Native Kitty animation, Sixel rendering and multiplexer forwarding are deferred.
+FrameClock provides caller-controlled cell pacing without an idle timer.
 
 ## Integration and platform strategy
 

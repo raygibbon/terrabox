@@ -38,7 +38,8 @@ def smoke(name, arguments, interactions, idle=False):
                 try: output.extend(os.read(master, 65536))
                 except OSError: break
     try:
-        drain(.15)
+        # Let the explicit 250ms startup probe finish before measuring idle.
+        drain(.4)
         if idle:
             stat = Path(f"/proc/{process.pid}/stat")
             if stat.exists():
@@ -62,6 +63,8 @@ def smoke(name, arguments, interactions, idle=False):
         assert process.returncode == 0, f"{name}: exit {process.returncode}: {output[-1000:]!r}"
         assert termios.tcgetattr(slave) == original, f"{name}: terminal not restored"
         assert b"panicked" not in output and b"Error:" not in output, output[-1000:]
+        if name in ("kitty-image", "terratui-image-viewer"):
+            assert b"\x1b_Ga=t" not in output, "unconfirmed graphics must not upload pixels"
         if name == "terratui-widgets":
             assert b"%" in output and b"Profile" in output, "missing progress/dialog output"
         print(f"{name}: keyboard, resize, exit and terminal restoration passed")
@@ -81,3 +84,12 @@ with tempfile.TemporaryDirectory(prefix="terrabox-smoke-") as folder:
     for i in range(40): (base / f"sample-{i:02}.txt").write_text("example\n")
     smoke("terratui-files", [folder], [b"\t", b"\x1b[B", b"\r", b"\x7f", b"\x1b[F", b"\x1b[5~", F3, b"\r", None, F10], idle=True)
 smoke("terratui-widgets", [], [F5, b"\t", b"\t", F1, "λ".encode(), b"\t", b"\x1b[Z", b"\r", F6, None, b"\x11"], idle=True)
+
+# Phase 3: the pseudo-terminal deliberately sends no graphics replies, so
+# graphics demos must use the actual text fallback without leaking image data.
+smoke("terminal-capabilities", [], [None, b"\x1b"], idle=True)
+smoke("terrabox-animation", [], [b" ", b"+", b"-", None, b" ", b"\x1b"])
+if (ROOT / "target/debug/examples/kitty-image").exists():
+    smoke("kitty-image", [], [b"r", b"d", b"u", None, b"\x1b"], idle=True)
+if (ROOT / "target/debug/examples/terratui-image-viewer").exists():
+    smoke("terratui-image-viewer", [], [b"\x1b[B", b"\t", F1, b"\r", b"\x1bOQ", b"\x1bOQ", None, b"\x11"], idle=True)

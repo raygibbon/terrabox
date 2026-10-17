@@ -23,6 +23,15 @@
 - Region-only scroll snapshots backed by measurements and Unicode comparison tests.
 - Four interactive examples, real terminal screenshots and repeatable capture tools.
 
+## Phase 3 delivered
+
+- Structured capability evidence and explicit bounded, cached runtime probes.
+- Optional direct Kitty RGBA uploads, placements, replacement and bounded resources.
+- Cell/graphics output coordination, suspend/drop cleanup and resize re-placement.
+- FrameClock pacing and optional TerraTUI ImageView with text fallback.
+- Four working examples, protocol/PTY tests and two actual xterm screenshots.
+- See [validation](phase3-validation.md) for unverified emulator/platform behavior.
+
 ## Next: application adoption and platform verification
 
 - Adopt the Surface/focus/widget boundaries incrementally in TDX and Navi8or,
@@ -38,8 +47,8 @@
 ## Later, optional and separately validated
 
 - Capability-aware physical scroll regions with portable surface fallback.
-- Public verified terminal capability reporting, including colour fallbacks.
-- Kitty graphics probes, uploads, alpha, placements, clipping and ID cleanup.
+- Real-emulator graphics validation and pixel cropping/fit policies.
+- Explicitly negotiated multiplexer graphics transport.
 - Separate Kitty native animation negotiation, frames and timing controls.
 - UI easing/transitions without an always-running render loop.
 - Sixel if actual applications need it.

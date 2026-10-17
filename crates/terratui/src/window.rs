@@ -28,6 +28,11 @@ impl EventResult {
 
 /// A persistent interaction object drawing only inside its supplied canvas.
 pub trait Widget: std::any::Any {
+    #[cfg(feature = "kitty-graphics")]
+    fn prepare_graphics(&mut self, _available: bool) {}
+    #[cfg(feature = "kitty-graphics")]
+    fn collect_graphics(&self, _area: Rect, _requests: &mut Vec<terrabox::graphics::ImageRequest>) {
+    }
     fn draw(&mut self, canvas: &mut Canvas<'_>, focused: bool, theme: &Theme);
     fn event(&mut self, _event: &Event) -> EventResult {
         EventResult::default()
@@ -211,6 +216,42 @@ impl Desktop {
             .find(|window| window.id == id)
             .map(|window| window.widget.event(&local))
             .unwrap_or_default()
+    }
+
+    /// Compose text and optional image placements through one engine pipeline.
+    pub fn present(&mut self, terminal: &mut terrabox::Terminal) -> std::io::Result<()> {
+        #[cfg(feature = "kitty-graphics")]
+        {
+            let available =
+                terminal.graphics_available() && !self.has_modal() && !self.menu.is_active();
+            for window in &mut self.windows {
+                window.widget.prepare_graphics(available);
+            }
+        }
+        let surface = self.render(terminal.size());
+        terminal.draw_surface(&surface, terrabox::Position::default());
+        #[cfg(feature = "kitty-graphics")]
+        {
+            let requests = self.image_requests();
+            terminal.sync_graphics(&requests)?;
+        }
+        terminal.hide_cursor();
+        terminal.present()
+    }
+
+    /// Resolve image requests from the most recently rendered layout. Modal and
+    /// menu overlays suppress the whole image scene rather than pixel clipping.
+    #[cfg(feature = "kitty-graphics")]
+    pub fn image_requests(&self) -> Vec<terrabox::graphics::ImageRequest> {
+        let mut requests = Vec::new();
+        if !self.has_modal() && !self.menu.is_active() {
+            for window in &self.windows {
+                if let Some((_, area)) = self.areas.iter().find(|(id, _)| *id == window.id) {
+                    window.widget.collect_graphics(*area, &mut requests);
+                }
+            }
+        }
+        requests
     }
 
     pub fn render(&mut self, size: Size) -> Surface {
