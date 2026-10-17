@@ -24,6 +24,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "terrabox",
+ "unicode-segmentation",
 ]
 
 [[package]]

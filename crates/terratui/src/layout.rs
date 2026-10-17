@@ -11,11 +11,18 @@ pub enum Axis {
 pub enum Length {
     Fixed(u16),
     Flex(u16),
+    /// Reserve a minimum, then share remaining space by weight.
+    MinFlex {
+        min: u16,
+        weight: u16,
+    },
 }
 
 /// Nested splits. Fixed lengths truncate at the edge; flex lengths share the rest.
 #[derive(Clone, Debug)]
 pub enum Layout {
+    /// Collapsed layouts consume no space and cannot receive focus.
+    Hidden,
     Window(WindowId),
     Split {
         axis: Axis,
@@ -41,16 +48,22 @@ impl Layout {
 
     fn assign(&self, area: Rect, result: &mut Vec<(WindowId, Rect)>) {
         match self {
+            Self::Hidden => {}
             Self::Window(id) => result.push((*id, area)),
             Self::Split { axis, children } => {
                 let total = match axis {
                     Axis::Horizontal => area.width,
                     Axis::Vertical => area.height,
                 };
+                let children: Vec<_> = children
+                    .iter()
+                    .filter(|(_, layout)| !matches!(layout, Layout::Hidden))
+                    .collect();
                 let fixed: u64 = children
                     .iter()
                     .map(|(length, _)| match length {
                         Length::Fixed(value) => u64::from(*value),
+                        Length::MinFlex { min, .. } => u64::from(*min),
                         _ => 0,
                     })
                     .sum();
@@ -58,6 +71,7 @@ impl Layout {
                     .iter()
                     .map(|(length, _)| match length {
                         Length::Flex(value) => u64::from(*value),
+                        Length::MinFlex { weight, .. } => u64::from(*weight),
                         _ => 0,
                     })
                     .sum();
@@ -66,13 +80,18 @@ impl Layout {
                 for (length, child) in children {
                     let desired = match length {
                         Length::Fixed(value) => *value,
-                        Length::Flex(value) => {
+                        Length::Flex(value) | Length::MinFlex { weight: value, .. } => {
                             let share = (flexible * u64::from(*value))
                                 .checked_div(weight)
                                 .unwrap_or(0);
                             weight -= u64::from(*value);
                             flexible -= share;
-                            share as u16
+                            let min = if let Length::MinFlex { min, .. } = length {
+                                *min
+                            } else {
+                                0
+                            };
+                            min.saturating_add(share as u16)
                         }
                     };
                     let size = desired.min(total.saturating_sub(used));

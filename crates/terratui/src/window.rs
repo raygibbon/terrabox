@@ -1,6 +1,6 @@
 use crate::widgets::{MenuBar, StatusBar};
 use crate::{Bindings, CommandId, Focus, Layout, Scope, Theme, WindowId};
-use terrabox::{Canvas, Event, Key, Modifiers, Rect, Size, Surface};
+use terrabox::{Canvas, Event, Key, Rect, Size, Surface};
 
 /// Event consumption is explicit; redraw is independent of command emission.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -41,7 +41,6 @@ struct Window {
 }
 
 /// Retained tiled windows, modal overlays, command menu and status bar.
-#[derive(Default)]
 pub struct Desktop {
     pub layout: Layout,
     pub bindings: Bindings,
@@ -51,6 +50,26 @@ pub struct Desktop {
     focus: Focus,
     windows: Vec<Window>,
     next_id: u64,
+    /// Apply default Tab traversal only after a widget declines the key.
+    pub tab_navigation: bool,
+    areas: Vec<(WindowId, Rect)>,
+}
+
+impl Default for Desktop {
+    fn default() -> Self {
+        Self {
+            layout: Layout::default(),
+            bindings: Bindings::default(),
+            menu: MenuBar::default(),
+            status: StatusBar::default(),
+            theme: Theme::default(),
+            focus: Focus::default(),
+            windows: Vec::new(),
+            next_id: 0,
+            tab_navigation: true,
+            areas: Vec::new(),
+        }
+    }
 }
 
 impl Desktop {
@@ -113,6 +132,10 @@ impl Desktop {
 
     pub fn route(&mut self, event: &Event) -> EventResult {
         if let Some(modal) = self.focus.modal() {
+            let result = self.deliver(modal, event);
+            if result.consumed {
+                return result;
+            }
             if matches!(event, Event::Key(key) if key.key == Key::Escape) {
                 self.close_modal();
                 return EventResult::handled();
@@ -122,23 +145,38 @@ impl Desktop {
             {
                 return EventResult::command(command);
             }
-            let result = self.deliver(modal, event);
             return EventResult {
                 consumed: true,
                 ..result
             };
         }
+        if self.menu.wants_event(event) {
+            return self.menu.event(event);
+        }
+        let previous_focus = self.focus.active();
+        if let Event::Mouse(mouse) = event
+            && mouse.kind == terrabox::MouseKind::Press
+            && let Some((id, _)) = self
+                .areas
+                .iter()
+                .find(|(_, area)| area.contains(mouse.position))
+        {
+            self.focus.select(*id);
+        }
+        let mut result = self
+            .focus
+            .active()
+            .map(|id| self.deliver(id, event))
+            .unwrap_or_default();
+        result.redraw |= previous_focus != self.focus.active();
+        if result.consumed {
+            return result;
+        }
         if let Event::Key(key) = event {
-            if self.menu.is_active()
-                || (key.key == Key::Function(10) && key.modifiers == Modifiers::NONE)
+            if let Some(reverse) = crate::widgets::tab_direction(event)
+                && self.tab_navigation
             {
-                return self.menu.event(event);
-            }
-            if key.modifiers == Modifiers::NONE && matches!(key.key, Key::Tab | Key::BackTab)
-                || key.key == Key::Tab && key.modifiers == Modifiers::SHIFT
-            {
-                self.focus
-                    .advance(key.key == Key::BackTab || key.modifiers == Modifiers::SHIFT);
+                self.focus.advance(reverse);
                 return EventResult::handled();
             }
             if let Some(id) = self.focus.active()
@@ -146,28 +184,32 @@ impl Desktop {
             {
                 return EventResult::command(command);
             }
-        }
-        let result = self
-            .focus
-            .active()
-            .map(|id| self.deliver(id, event))
-            .unwrap_or_default();
-        if result.consumed {
-            return result;
-        }
-        if let Event::Key(key) = event
-            && let Some(command) = self.bindings.resolve(Scope::Global, *key)
-        {
-            return EventResult::command(command);
+            if let Some(command) = self.bindings.resolve(Scope::Global, *key) {
+                return EventResult::command(command);
+            }
         }
         result
     }
 
     fn deliver(&mut self, id: WindowId, event: &Event) -> EventResult {
+        let local = if let Event::Mouse(mouse) = event {
+            let Some((_, area)) = self.areas.iter().find(|(target, _)| *target == id) else {
+                return EventResult::default();
+            };
+            if !area.contains(mouse.position) {
+                return EventResult::default();
+            }
+            let mut mouse = *mouse;
+            mouse.position.x -= area.x;
+            mouse.position.y -= area.y;
+            Event::Mouse(mouse)
+        } else {
+            event.clone()
+        };
         self.windows
             .iter_mut()
             .find(|window| window.id == id)
-            .map(|window| window.widget.event(event))
+            .map(|window| window.widget.event(&local))
             .unwrap_or_default()
     }
 
@@ -184,6 +226,7 @@ impl Desktop {
             size.height.saturating_sub(menu_rows + status_rows),
         );
         let arranged = self.layout.arrange(area);
+        self.areas = arranged.clone();
         let visible: Vec<_> = arranged
             .iter()
             .filter(|(_, rect)| rect.width > 0 && rect.height > 0)
@@ -223,6 +266,10 @@ impl Desktop {
                 &self.theme,
             );
         }
+        self.menu.draw_dropdown(
+            &mut surface.canvas(Rect::new(0, 0, size.width, size.height)),
+            &self.theme,
+        );
         for window in self
             .windows
             .iter_mut()
@@ -237,6 +284,7 @@ impl Desktop {
                 width,
                 height,
             );
+            self.areas.push((window.id, area));
             window.widget.draw(
                 &mut surface.canvas(area),
                 self.focus.active() == Some(window.id),

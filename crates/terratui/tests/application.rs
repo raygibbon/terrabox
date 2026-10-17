@@ -142,5 +142,91 @@ fn timers_messages_shutdown_errors_and_unwinding_restore_the_terminal() -> io::R
             Mode::Panic => assert!(result.is_err()),
         }
     }
+    let (terminal, _master, _slave, _original) = terminal()?;
+    let received = Rc::new(RefCell::new(false));
+    let sender_slot = Rc::new(RefCell::new(None));
+    Application::new(
+        Background {
+            received: received.clone(),
+            sender_slot: sender_slot.clone(),
+            worker: None,
+        },
+        Desktop::default(),
+    )
+    .run_on(terminal)?;
+    assert!(
+        *received.borrow(),
+        "worker must wake a loop blocked without input"
+    );
+    let sender = sender_slot.borrow();
+    let sender = sender.as_ref().unwrap();
+    assert!(sender.is_closed());
+    assert!(sender.send(9).is_err());
+    // Notification bursts must never block a producer or starve ready keyboard input.
+    let (mut terminal, master, _slave, _original) = self::terminal()?;
+    let waker = terminal.waker();
+    for _ in 0..1000 {
+        waker.wake()?;
+    }
+    assert_eq!(
+        unsafe { libc::write(master.as_raw_fd(), b"x".as_ptr().cast(), 1) },
+        1
+    );
+    assert!(
+        matches!(terminal.try_event()?, Some(terratui::terrabox::Event::Key(k)) if k.key == terratui::terrabox::Key::Char('x'))
+    );
+    let started = Instant::now();
+    assert!(
+        terminal
+            .wait_event(Some(Duration::from_millis(200)))?
+            .is_none()
+    );
+    assert!(
+        started.elapsed() < Duration::from_millis(100),
+        "pending notification must wake immediately"
+    );
+    drop(terminal);
+    // Handles own their resources; keeping one after terminal teardown is safe.
+    waker.wake()?;
+
     Ok(())
+}
+
+struct Background {
+    received: Rc<RefCell<bool>>,
+    sender_slot: Rc<RefCell<Option<terratui::EventSender<u8>>>>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+impl App for Background {
+    type Message = u8;
+    fn init(&mut self, context: &mut Context<'_, u8>) -> io::Result<()> {
+        let sender = context.sender();
+        *self.sender_slot.borrow_mut() = Some(sender.clone());
+        // Safety deadline prevents a broken wakeup from hanging the suite.
+        context.set_timer(
+            TimerId(99),
+            Deadline::after(Duration::from_secs(2)).unwrap(),
+        );
+        self.worker = Some(std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(25));
+            sender.send(7).unwrap();
+        }));
+        Ok(())
+    }
+    fn event(&mut self, event: AppEvent<u8>, context: &mut Context<'_, u8>) -> io::Result<()> {
+        match event {
+            AppEvent::User(7) => {
+                *self.received.borrow_mut() = true;
+                context.quit();
+            }
+            AppEvent::Timer(_) => return Err(io::Error::other("worker wakeup timed out")),
+            _ => {}
+        }
+        Ok(())
+    }
+    fn shutdown(&mut self, context: &mut Context<'_, u8>) -> io::Result<()> {
+        assert!(context.sender().is_closed());
+        self.worker.take().unwrap().join().unwrap();
+        Ok(())
+    }
 }

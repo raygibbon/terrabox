@@ -13,17 +13,27 @@
 - Demonstration of focus, commands, modal closure, resize and clean shutdown.
 - Linux regression and framework tests; available Windows cross-build checks.
 
-## Next: application adoption
+## Phase 2 delivered
 
-- Migrate TDX's dependency/imports in its own repository, then its duplicate Frame.
-- Replace Navi8or's Rust terminal boundary independently of its C implementation.
-- Add list/tree/input/button/scrollbar widgets driven by real integration needs.
-- Add pull-down/popup menus, disabled commands, mnemonics, configurable key chords
-  and richer focus traversal inside composite widgets.
-- Add explicit cross-thread wake events and background job integration.
-- Add floating window geometry, drag/resize and persisted layout adapters.
-- Measure rendering allocation/output costs before changed-cell optimisation.
-- Native final-source Windows tests and macOS builds/manual lifecycle checks.
+- Nested focus groups; widget-first keyboard handling and configurable traversal.
+- Application-scoped background messages with native wakeups and cooperative shutdown.
+- Labels, buttons, Unicode input, editable modal forms, lists, trees and progress.
+- Dropdown menus, mnemonics, shortcuts, disabled items, separators and mouse handling.
+- Minimum-size flex allocations and collapsed layout nodes.
+- Region-only scroll snapshots backed by measurements and Unicode comparison tests.
+- Four interactive examples, real terminal screenshots and repeatable capture tools.
+
+## Next: application adoption and platform verification
+
+- Adopt the Surface/focus/widget boundaries incrementally in TDX and Navi8or,
+  with changes performed separately in those repositories.
+- Native final-source Windows console tests and macOS build/lifecycle validation.
+- Scrollbars, tree selection/activation commands and richer text input/cursor UX.
+- Scrolling large menus and nested submenus when demanded by real commands.
+- Consumer-controlled alternate layouts for very small terminals.
+- Bounded/coalescing worker update policies if integration exposes queue pressure.
+- Floating geometry, drag/resize and persisted layout adapters.
+- Measure frame allocations and terminal output before further rendering changes.
 
 ## Later, optional and separately validated
 

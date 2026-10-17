@@ -10,6 +10,7 @@ keywords = ["terminal", "tui", "application"]
 categories = ["command-line-interface"]
 
 [dependencies]
+unicode-segmentation = "1.12"
 terrabox = { version = "0.1.0", path = "../terrabox" }
 
 [target.'cfg(unix)'.dev-dependencies]

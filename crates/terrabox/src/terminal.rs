@@ -90,6 +90,11 @@ impl Terminal {
             caps,
         })
     }
+    /// Wake a blocking `wait_event` from another thread.
+    pub fn waker(&self) -> crate::Waker {
+        self.backend.waker()
+    }
+
     pub fn size(&self) -> Size {
         self.back.size
     }
@@ -198,7 +203,8 @@ impl Terminal {
     pub fn try_event(&mut self) -> io::Result<Option<Event>> {
         self.wait_event(Some(Duration::ZERO))
     }
-    fn wait_event(&mut self, timeout: Option<Duration>) -> io::Result<Option<Event>> {
+    /// Wait for input, timeout, or a notification. Notifications return `None`.
+    pub fn wait_event(&mut self, timeout: Option<Duration>) -> io::Result<Option<Event>> {
         if self.suspended {
             return Ok(None);
         }
@@ -275,6 +281,7 @@ impl Terminal {
                         return Ok(Some(event));
                     }
                 }
+                Wake::Notification => return Ok(None),
                 Wake::Timeout => {}
             }
             if let Some(d) = deadline

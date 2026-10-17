@@ -70,6 +70,7 @@ extern "C" fn on_resize(_: libc::c_int) {
 }
 
 pub(crate) struct Backend {
+    notification: std::sync::Arc<crate::notification::Notification>,
     input: RawFd,
     output: RawFd,
     original: libc::termios,
@@ -84,6 +85,9 @@ pub(crate) struct Backend {
 }
 
 impl Backend {
+    pub fn waker(&self) -> crate::Waker {
+        self.notification.waker()
+    }
     pub fn event_fds(&self) -> (BorrowedFd<'_>, BorrowedFd<'_>) {
         // SAFETY: the backend owns both descriptors for at least this borrow.
         unsafe {
@@ -133,6 +137,7 @@ impl Backend {
         owned_fds: Option<(OwnedFd, OwnedFd)>,
         lease: SignalLease,
     ) -> io::Result<Self> {
+        let notification = std::sync::Arc::new(crate::notification::Notification::new()?);
         let mut original = std::mem::MaybeUninit::<libc::termios>::uninit();
         // SAFETY: tcgetattr initializes original for a valid terminal descriptor.
         if unsafe { libc::tcgetattr(input, original.as_mut_ptr()) } != 0 {
@@ -182,6 +187,7 @@ impl Backend {
         // SAFETY: sigaction succeeded.
         let previous_signal = unsafe { previous.assume_init() };
         let mut backend = Self {
+            notification,
             input,
             output,
             original,
@@ -212,7 +218,7 @@ impl Backend {
     }
     pub fn wait(&mut self, timeout: Option<Duration>) -> io::Result<Wake> {
         let ms = timeout
-            .map(|d| d.as_millis().min(i32::MAX as u128) as i32)
+            .map(|d| d.as_nanos().div_ceil(1_000_000).min(i32::MAX as u128) as i32)
             .unwrap_or(-1);
         let mut fds = [
             libc::pollfd {
@@ -225,9 +231,14 @@ impl Backend {
                 events: libc::POLLIN,
                 revents: 0,
             },
+            libc::pollfd {
+                fd: self.notification.raw(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
         ];
         // SAFETY: fds points to two initialized pollfd values.
-        let ready = unsafe { libc::poll(fds.as_mut_ptr(), 2, ms) };
+        let ready = unsafe { libc::poll(fds.as_mut_ptr(), 3, ms) };
         if ready < 0 {
             let e = io::Error::last_os_error();
             if e.kind() == io::ErrorKind::Interrupted {
@@ -248,6 +259,10 @@ impl Backend {
         }
         if fds[0].revents & libc::POLLIN != 0 {
             return Ok(Wake::Input);
+        }
+        if fds[2].revents & libc::POLLIN != 0 {
+            self.notification.clear();
+            return Ok(Wake::Notification);
         }
         Err(io::Error::other("terminal input hangup or poll error"))
     }

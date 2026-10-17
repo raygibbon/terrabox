@@ -131,7 +131,23 @@ impl Surface {
             return;
         }
         let rect = self.bounds().intersection(rect);
-        let previous = self.buffer.clone();
+        if rect.width == 0 || rect.height == 0 {
+            return;
+        }
+        // Snapshot only the scroll region, retaining continuation markers so
+        // partial wide glyphs are still skipped by copy_region.
+        let mut cells = Vec::with_capacity(usize::from(rect.width) * usize::from(rect.height));
+        for y in rect.y..rect.bottom() {
+            let start = usize::from(y) * usize::from(self.size().width) + usize::from(rect.x);
+            cells.extend_from_slice(&self.buffer.cells[start..start + usize::from(rect.width)]);
+        }
+        let previous = Buffer {
+            size: Size {
+                width: rect.width,
+                height: rect.height,
+            },
+            cells,
+        };
         let mut canvas = self.canvas(rect);
         canvas.fill(fill);
         for target_y in rect.y..rect.bottom() {
@@ -141,7 +157,7 @@ impl Surface {
             }
             copy_region(
                 &previous,
-                Rect::new(rect.x, source_y as u16, rect.width, 1),
+                Rect::new(0, source_y as u16 - rect.y, rect.width, 1),
                 canvas.buffer,
                 Position {
                     x: rect.x,

@@ -1,66 +1,137 @@
-# TerraBox + TerraTUI
+# TerraBox
 
-A Rust terminal engine and application framework in one Cargo workspace,
-evolved from terra-term with its existing history and native backends intact.
+A lightweight Rust foundation for building cross-platform terminal applications.
 
-| Crate | Responsibility |
+**TerraBox** is the rendering and input engine. **TerraTUI** adds retained
+widgets, focus, layouts and an application lifecycle. Use either level directly;
+no async runtime, ncurses or GUI is required.
+
+| Crate | What it owns |
 |---|---|
-| `terrabox` | Terminal lifecycle, input, grapheme cells, changed-row rendering, clipped surfaces and region scrolling |
-| `terratui` | Retained applications, commands, focus, nested splits, panels, menu bar, modal dialogs, status and timers |
+| [`terrabox`](crates/terrabox) | Terminal restoration, input, Unicode cells, colours, clipped drawing, surfaces and changed-row presentation |
+| [`terratui`](crates/terratui) | Applications, commands, nested focus, menus, editable dialogs, lists, trees, progress, status and deadlines |
 
-TerraBox is independently usable. TerraTUI depends on TerraBox and reuses its
-cells, styles, input and rendering. Neither requires an async runtime or GUI.
-Files, documents, syntax, providers and application operations stay in consumers.
+## Screenshots
 
-## Run
+Actual running examples, captured in a 100×30 xterm. The file browser uses
+sample files in a temporary directory. [Capture instructions](assets/screenshots/README.md).
 
-```sh
-cargo run -p terratui --example desktop
-cargo run -p terrabox --example hello
+### TerraTUI desktop
+
+![TerraTUI desktop with dropdown menu](assets/screenshots/terratui-desktop.png)
+
+### Read-only dual-panel file browser
+
+![TerraTUI file browser](assets/screenshots/terratui-files.png)
+
+### Interactive widget gallery
+
+![TerraTUI widgets and background progress](assets/screenshots/terratui-widgets.png)
+
+[Editable modal dialog screenshot](assets/screenshots/terratui-dialog.png).
+
+### TerraBox on its own
+
+![TerraBox direct renderer](assets/screenshots/terrabox-demo.png)
+
+## Features
+
+- Native Unix and Windows backends; RAII terminal restoration on return and unwind.
+- Grapheme-aware cells, atomic wide-glyph clipping, surfaces and region scrolling.
+- Keyboard, mouse, paste and resize input; blocking waits and optional deadlines.
+- Nested focus scopes, widget-first key handling, configurable Tab/Shift+Tab,
+  modal trapping and restoration of previous focus.
+- Dropdown menus with mnemonics, shortcuts, disabled commands and separators.
+- Labels, buttons, Unicode text inputs, selectable lists, expandable trees,
+  editable dialogs, progress indicators and status bars.
+- Nested fixed, weighted and minimum-size splits; collapsed layouts.
+- Thread-safe application messages with native wakeups, cancellable timers
+  and cooperative worker shutdown. Idle applications have no periodic tick.
+
+## Architecture
+
+```text
+Application ───────> TerraBox ───> native terminal
+     └──> TerraTUI ────┘
 ```
 
-In the desktop demo: Tab/Shift-Tab switch panels, arrow/page keys navigate,
-F10 opens the command menu, F1 opens a modal, Enter/Escape closes it, and Ctrl+Q
-quits. Resizing reflows the layout. Idle applications block for input; timers
-and redraws run only on request. The menu MVP is a horizontal command menu;
-pull-down menus and composite input widgets are follow-up work.
+TerraBox has no dependency on TerraTUI. Widgets draw to clipped TerraBox canvases;
+applications own files, documents and business operations. Rendering runs on
+request. Terminal presentation compares changed rows with the previous frame.
+The logical desktop frame is rebuilt on redraw; there is no scene cache.
 
-## Use the libraries
+[Architecture](docs/architecture.md) · [Framework guide](docs/TERRATUI.md) ·
+[Engine guide](docs/ENGINE.md)
 
-For a sibling checkout, depend on `../terrabox/crates/terrabox` or
-`../terrabox/crates/terratui`. Imports use `terrabox` and `terratui`.
-Each crate has its own version and manifest. Publish TerraBox before TerraTUI,
-whose dependency includes both a local path and registry version.
+## Quick Start
 
-Engine source, tests and examples live under `crates/terrabox/`; framework
-source, tests and the desktop demo live under `crates/terratui/`. Test fixtures
-and licence files travel with their crate for packaging. `fuzz/` is a separate
-workspace referencing the engine and retains its own lockfile.
+Use a recent stable Rust toolchain supporting edition 2024, and run inside a terminal:
 
-## Validate
+```sh
+cargo run -p terrabox --example terrabox-demo
+cargo run -p terratui --example terratui-desktop
+cargo run -p terratui --example terratui-files -- .
+cargo run -p terratui --example terratui-widgets
+```
+
+For a sibling project, add one of these path dependencies:
+
+```toml
+[dependencies]
+terrabox = { path = "../terrabox/crates/terrabox" }
+# Or use the application framework:
+terratui = { path = "../terrabox/crates/terratui" }
+```
+
+Start with the beginner examples in the [engine README](crates/terrabox/README.md)
+and [framework README](crates/terratui/README.md).
+
+## Examples
+
+| Example | Interaction |
+|---|---|
+| `terrabox-demo` | Colour swatches, Unicode, clipped borders, moving cells; Space pauses, Escape quits; resize redraws |
+| `terratui-desktop` | Tab/Shift+Tab selects panels; F10 or Alt+F/E/V/H opens menus; Edit changes workspace name; View changes theme; F1 shows About; Ctrl+Q quits |
+| `terratui-files` | Enter opens a directory, Backspace goes up, arrows/Page/Home/End navigate, Tab switches panels, F3 shows metadata, F10 quits |
+| `terratui-widgets` | Tab traverses controls and panels, arrows navigate lists/trees; F1 opens a form, F5 starts background progress, F6 changes theme, Ctrl+Q quits |
+
+Dialogs capture keyboard input: Enter activates a button or the default action;
+Escape cancels. Close a modal before using a global quit shortcut. Mouse clicks
+select panels, controls and menu commands in the desktop and gallery.
+The original `desktop` and focused engine examples remain available.
+
+## Platform Support
+
+Linux has automated PTY and live xterm checks. The current source also passes
+Windows GNU cross-target checks; this does **not** verify native Windows console
+behavior. Native macOS and Windows runtime validation remain pending. Terminal
+font coverage and support for physical key combinations vary.
+See the [Phase 2 validation report](docs/phase2-validation.md) for exact checks.
+
+## Development
 
 ```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo build --workspace
-cargo check --manifest-path fuzz/Cargo.toml --all-targets
+cargo build --workspace --examples
+python3 scripts/smoke-examples.py       # Unix PTY checks; Linux idle CPU measurement
+cargo run --release -p terrabox --example scroll-bench
 ```
 
-Linux has PTY regression tests. Windows has native console support and host
-validation scripts; cross-compilation alone does not verify console behaviour.
-macOS native validation remains pending. See [validation](docs/validation.md)
-for this migration's exact results. Kitty graphics and advanced animations are
-planned, not implemented; no graphics support is assumed or probed by default.
+The scroll workload and [measurements](docs/phase2-validation.md) justify limiting
+snapshots to the affected region. No renderer cache or output protocol was added.
 
-## Design and integration
+## Roadmap
 
-- [Repository audit and ownership matrix](docs/architecture-review.md)
-- [Architecture and graphics integration plan](docs/architecture.md)
-- [MVP and future roadmap](docs/roadmap.md)
-- [Engine guide](docs/ENGINE.md) and [capabilities](docs/FEATURES.md)
-- [Framework usage](docs/TERRATUI.md)
-- [Windows validation](docs/WINDOWS_VALIDATION.md)
+Next: application adoption, native platform testing, scrollbars, richer tree
+activation, large-menu scrolling and nested submenus when needed. Floating
+windows, graphics and transitions are future work. **Kitty graphics, image
+upload/placement and advanced animation are planned, not implemented.** Current
+animation uses timed cell drawing. [Roadmap](docs/roadmap.md).
 
-MIT licensed. Adapted termbox2 capability tables retain their
-[third-party notice](THIRD_PARTY_NOTICES.md).
+## License
+
+MIT. Existing copyright and adapted termbox2 capability-table notices are
+preserved in [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

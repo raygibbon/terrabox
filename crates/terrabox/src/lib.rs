@@ -38,6 +38,7 @@ mod cell;
 mod color;
 mod event;
 mod key;
+mod notification;
 mod platform;
 mod surface;
 mod terminal;
@@ -51,6 +52,7 @@ pub use event::{
     SequenceRegistrationError,
 };
 pub use key::{Key, KeyEvent, Modifiers};
+pub use notification::Waker;
 pub use surface::{Canvas, Rect, Surface, text_width};
 pub use terminal::{Position, Size, Terminal};
 pub use timing::Deadline;

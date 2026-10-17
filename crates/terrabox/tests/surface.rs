@@ -102,3 +102,61 @@ fn deadline_remaining_is_monotonic_and_saturates_at_zero() {
         Duration::ZERO
     );
 }
+
+#[test]
+fn region_scroll_matches_snapshot_reference_across_unicode_boundaries() {
+    let mut original = surface();
+    for (row, text) in ["界abc界x", "a界e\u{301}界!", "👩‍💻abc界x", "abcdef界"]
+        .iter()
+        .enumerate()
+    {
+        original
+            .canvas(original.bounds())
+            .put_str(0, row as u16, text, Style::default());
+    }
+    for x in 0..9 {
+        for width in 0..10 {
+            for y in 0..5 {
+                for height in 0..6 {
+                    for rows in [-8, -1, 0, 1, 8, i32::MIN, i32::MAX] {
+                        let rect = Rect::new(x, y, width, height).intersection(original.bounds());
+                        let fill = Style::new(Color::Indexed(1), Color::Indexed(2));
+                        let mut expected = original.clone();
+                        if rows != 0 {
+                            expected.canvas(rect).fill(fill);
+                            for target in rect.y..rect.bottom() {
+                                let source = i64::from(target) + i64::from(rows);
+                                if source >= i64::from(rect.y) && source < i64::from(rect.bottom())
+                                {
+                                    for sx in rect.x..rect.right() {
+                                        if let Some(cell) = original.cell(sx, source as u16)
+                                            && usize::from(sx) + terrabox::text_width(&cell.text())
+                                                <= usize::from(rect.right())
+                                        {
+                                            expected.canvas(rect).put_cell(
+                                                sx - rect.x,
+                                                target - rect.y,
+                                                cell.clone(),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        let mut actual = original.clone();
+                        actual.scroll(rect, rows, fill);
+                        for cy in 0..4 {
+                            for cx in 0..8 {
+                                assert_eq!(
+                                    actual.cell(cx, cy),
+                                    expected.cell(cx, cy),
+                                    "rect={rect:?}, rows={rows}, cell={cx},{cy}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

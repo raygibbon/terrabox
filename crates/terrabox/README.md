@@ -21,3 +21,19 @@ fn main() -> std::io::Result<()> {
 
 See the repository documentation for platform limitations and validation scope.
 Adapted termbox2 capability data is covered by THIRD_PARTY_NOTICES.md.
+
+For off-screen drawing, create `Surface::new(size)` and obtain a local
+`surface.canvas(Rect::new(x, y, width, height))`. Canvases clip nested views and
+preserve wide glyphs at boundaries. Composite with `terminal.draw_surface`, then
+`terminal.present`. Surface scrolling snapshots only the requested region.
+
+Run `cargo run -p terrabox --example terrabox-demo` from the workspace for
+colours, Unicode, drawing, resize and timed cell animation without TerraTUI.
+`read_event` blocks without polling. `wait_event` accepts an optional timeout
+and returns `None` for timeout or notification; `terminal.waker()` is cloneable
+and thread-safe. Store messages separately, then wake after enqueueing them.
+The convenience `read_event` keeps waiting through notifications.
+
+This engine does not manage application lifecycle callbacks, widgets or focus.
+Cell animation can use `Deadline` and timed waits; Kitty graphics, image
+placement and advanced animation are planned and are not implemented.

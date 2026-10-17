@@ -10,9 +10,10 @@ use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows_sys::Win32::Storage::FileSystem::WriteFile;
 use windows_sys::Win32::System::Console::*;
-use windows_sys::Win32::System::Threading::WaitForSingleObject;
+use windows_sys::Win32::System::Threading::WaitForMultipleObjects;
 
 pub(crate) struct Backend {
+    notification: std::sync::Arc<crate::notification::Notification>,
     input: HANDLE,
     output: HANDLE,
     // Own duplicates, never close the process standard handles. These outlive Drop::suspend.
@@ -80,6 +81,9 @@ impl Drop for ConsoleLease {
     }
 }
 impl Backend {
+    pub fn waker(&self) -> crate::Waker {
+        self.notification.waker()
+    }
     pub fn new(caps: Capabilities) -> io::Result<Self> {
         let lease = ConsoleLease::acquire()?;
         // SAFETY: these queries take valid standard-handle identifiers.
@@ -112,6 +116,7 @@ impl Backend {
             return Err(io::Error::last_os_error());
         }
         let mut backend = Self {
+            notification: std::sync::Arc::new(crate::notification::Notification::new()?),
             input: input_owner.as_raw_handle(),
             output: output_owner.as_raw_handle(),
             _input_owner: input_owner,
@@ -173,7 +178,10 @@ impl Backend {
                 })
                 .unwrap_or(u32::MAX);
             // SAFETY: input is a valid waitable console input handle.
-            match unsafe { WaitForSingleObject(self.input, ms) } {
+            match unsafe {
+                WaitForMultipleObjects(2, [self.input, self.notification.raw()].as_ptr(), 0, ms)
+            } {
+                value if value == WAIT_OBJECT_0 + 1 => return Ok(Wake::Notification),
                 WAIT_TIMEOUT => {
                     if deadline.is_none_or(|d| Instant::now() < d) {
                         continue;

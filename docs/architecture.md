@@ -29,7 +29,9 @@ buffer and emits changed rows. Rebuilding a logical frame on demand keeps
 overlap restoration simple; unchanged frames are not presented. Surfaces are
 opaque, not alpha-composited. Wide graphemes are atomic at clipping boundaries;
 partial glyphs are skipped and writes never erase a glyph outside a clip.
-Portable region scrolling moves logical cells and fills exposed rows. Hardware
+Portable region scrolling moves logical cells and fills exposed rows. It snapshots
+only the affected rectangle rather than cloning the whole surface; a repeatable
+release workload and Unicode boundary comparison validate this change. Hardware
 terminal scroll commands are deferred until front-buffer synchronisation and
 capability fallbacks have dedicated tests.
 
@@ -39,14 +41,20 @@ TerraTUI retains a Desktop of windows with stable WindowId values and boxed
 stateful Widget objects. Each widget exposes drawing and event consumption.
 Applications may add custom widgets that render styled content using TerraBox
 types. A recursive Layout supports horizontal/vertical splits and fixed/flex
-lengths. Short terminals truncate fixed lengths and distribute integer remainders
+lengths, including minimum-size flex allocation and collapsed children. Short
+terminals truncate in declaration order and distribute integer remainders
 deterministically; zero-sized regions are valid.
 
-Focus is a stable ID, not an array position or document ID. Tab/BackTab cycle
-base windows. Modal windows capture all input and restore the previous focus
-when closed; nested modal windows form a stack. Draw order is base insertion
-order followed by modal stack order. The MVP exposes tiled base windows and
-centred modal overlays; arbitrary draggable floating windows are deferred.
+Focus is a stable ID within its owner, not an array position or document ID.
+Desktop owns a base window order and modal stack; Group owns its own child order
+and remembered focus. Groups nest recursively. Focused children receive keys
+before parent default navigation. Each group chooses cycle, bubble-at-edge or
+manual Tab policy; desktop default traversal is optional. Modal forms trap Tab
+and Shift+Tab, and modal closure restores the previous retained window and child
+state. Rendering reconciles focus only when visibility invalidates the target.
+Mouse hit testing translates coordinates at every ownership boundary. Draw order
+is base windows, menu overlays, then modals. Arbitrary draggable floating windows
+remain deferred. See [framework routing details](TERRATUI.md).
 
 Compared with immediate-mode UI, retained state avoids repeatedly rebuilding
 selection, focus and menu state, and gives commands persistent targets. Costs
@@ -56,13 +64,15 @@ this is not a full cached scene graph or a Ratatui widget API clone.
 
 ## Input, commands and application lifecycle
 
-Native events flow through the existing parser/backend to Application, then to
-Desktop: modal capture first, menu navigation, local bindings, focused widget,
-global bindings and application callback. Local bindings override global ones;
-modal input cannot trigger base/global shortcuts accidentally. Menus emit the
-same CommandId as key bindings. Bindings are replaceable data, not hardcoded
-application operations. The initial menu bar is a single horizontal command
-menu (F10, Left/Right, Enter, Escape), not a complete pull-down hierarchy.
+Native events flow from parser/backend through Application to Desktop. Modal
+capture comes first. Otherwise menu activation/capture precedes ordinary input;
+focused widgets receive remaining keys before local bindings, default traversal
+and global bindings. A widget consumes keys explicitly, including Tab for editor
+indentation. Local commands override global commands. Modal input never falls
+through to base/global bindings. MenuBar retains its original horizontal command
+API and now also owns dropdowns with disabled entries, separators, shortcuts,
+mnemonics and keyboard/mouse dispatch. Nested submenus are deferred until a
+consumer needs them; the examples' small menus do not require a hierarchy.
 
 Application owns Terminal during `run`, calls initialise/shutdown hooks and
 propagates I/O errors. Drop restores terminal state on error/unwind. Context
@@ -71,14 +81,23 @@ handoff through Terminal::run_command. Suspension remains paired with engine
 resume; resuming invalidates layout/rendering even if dimensions did not change.
 The framework does not intercept process aborts or promise recovery from SIGKILL.
 
-Application-defined events are generic, queued on the UI thread and delivered
-to the application callback. This MVP does not provide a cross-thread wake
-channel. Background work may request a timer for polling; a future native wake
-source can integrate with the existing Unix event descriptors and Windows wait.
+Application-defined messages use a per-run standard MPSC channel and a cloneable
+EventSender. Enqueue precedes a coalescing TerraBox notification. Unix backends
+poll a nonblocking socket alongside terminal input and SIGWINCH; Windows waits
+on an auto-reset event and console input. The low-level Waker owns its native
+resource through Arc, independent of terminal lifetime; it exposes no widgets
+or application types. Terminal::wait_event returns None on notification, while
+read_event continues waiting. UI state remains exclusively on the application
+thread; messages can carry stable IDs to resolve with widget_mut.
+
+The sender closes before shutdown and during unwind. Workers cooperatively
+check is_closed; applications own/join task handles. No scheduler or async
+runtime was added. Input is checked between queued messages. The channel is
+unbounded, so producers must limit or coalesce high-rate updates.
 
 ## Scheduling and animation
 
-Idle applications block in read_event. Requested one-shot timers establish the
+Idle applications block in wait_event on native input/notification sources. Requested one-shot timers establish the
 next wake deadline; timeouts are recomputed after input, due timers are removed
 before dispatch, and redraw is requested explicitly. No periodic tick exists by
 default. A cell animation schedules its next engine Deadline and changes cells.

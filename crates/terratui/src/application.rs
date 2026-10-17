@@ -1,6 +1,47 @@
 use crate::{CommandId, Desktop};
 use std::collections::{BTreeMap, VecDeque};
 use std::io;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
+
+/// Cloneable sender scoped to one application run. No UI state crosses threads.
+pub struct EventSender<Message> {
+    sender: mpsc::Sender<Message>,
+    waker: terrabox::Waker,
+    closed: Arc<AtomicBool>,
+}
+impl<Message> Clone for EventSender<Message> {
+    fn clone(&self) -> Self {
+        Self {
+            sender: self.sender.clone(),
+            waker: self.waker.clone(),
+            closed: self.closed.clone(),
+        }
+    }
+}
+impl<Message> EventSender<Message> {
+    pub fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Acquire)
+    }
+    pub fn send(&self, message: Message) -> Result<(), mpsc::SendError<Message>> {
+        if self.is_closed() {
+            return Err(mpsc::SendError(message));
+        }
+        self.sender.send(message)?;
+        // The queue owns the message before the coalescing notification is sent.
+        let _ = self.waker.wake();
+        Ok(())
+    }
+}
+struct CloseOnDrop(Arc<AtomicBool>);
+impl Drop for CloseOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
 use std::time::Instant;
 use terrabox::{Deadline, Event, Terminal};
 
@@ -34,6 +75,7 @@ pub trait App {
 /// Mutations should request redraw when they affect visible application state.
 pub struct Context<'a, Message> {
     pub desktop: &'a mut Desktop,
+    sender: &'a EventSender<Message>,
     terminal: &'a mut Terminal,
     messages: &'a mut VecDeque<Message>,
     timers: &'a mut BTreeMap<TimerId, Deadline>,
@@ -42,6 +84,10 @@ pub struct Context<'a, Message> {
 }
 
 impl<Message> Context<'_, Message> {
+    /// Workers should check `is_closed` and be joined by `App::shutdown`.
+    pub fn sender(&self) -> EventSender<Message> {
+        self.sender.clone()
+    }
     pub fn redraw(&mut self) {
         *self.redraw = true;
     }
@@ -86,11 +132,18 @@ pub struct Application<Model: App> {
     timers: BTreeMap<TimerId, Deadline>,
     redraw: bool,
     running: bool,
+    sender: Option<EventSender<Model::Message>>,
+    receiver: mpsc::Receiver<Model::Message>,
+    channel: mpsc::Sender<Model::Message>,
 }
 
 impl<Model: App> Application<Model> {
     pub fn new(model: Model, desktop: Desktop) -> Self {
+        let (channel, receiver) = mpsc::channel();
         Self {
+            sender: None,
+            receiver,
+            channel,
             desktop,
             model,
             messages: VecDeque::new(),
@@ -106,9 +159,17 @@ impl<Model: App> Application<Model> {
 
     /// Use an explicitly connected terminal. Ownership ensures cleanup on return.
     pub fn run_on(mut self, mut terminal: Terminal) -> io::Result<()> {
+        let closed = Arc::new(AtomicBool::new(false));
+        let _close = CloseOnDrop(closed.clone());
+        self.sender = Some(EventSender {
+            sender: self.channel.clone(),
+            waker: terminal.waker(),
+            closed: closed.clone(),
+        });
         let result = self
             .with_context(&mut terminal, |model, context| model.init(context))
             .and_then(|()| self.event_loop(&mut terminal));
+        closed.store(true, Ordering::Release);
         let shutdown = self.with_context(&mut terminal, |model, context| model.shutdown(context));
         result.and(shutdown)
     }
@@ -120,6 +181,7 @@ impl<Model: App> Application<Model> {
     ) -> io::Result<()> {
         let mut context = Context {
             desktop: &mut self.desktop,
+            sender: self.sender.as_ref().expect("running application sender"),
             terminal,
             messages: &mut self.messages,
             timers: &mut self.timers,
@@ -162,6 +224,11 @@ impl<Model: App> Application<Model> {
             if !self.running {
                 break;
             }
+            if self.messages.is_empty()
+                && let Ok(message) = self.receiver.try_recv()
+            {
+                self.messages.push_back(message);
+            }
             if let Some(message) = self.messages.pop_front() {
                 self.dispatch(terminal, AppEvent::User(message))?;
             }
@@ -175,15 +242,17 @@ impl<Model: App> Application<Model> {
                 terminal.present()?;
                 self.redraw = false;
             }
-            if !self.messages.is_empty() {
-                continue;
+
+            // Drain one queued worker message per iteration, preserving input fairness.
+            if let Ok(message) = self.receiver.try_recv() {
+                self.messages.push_back(message);
             }
             let next = self.timers.values().min().copied();
-            let event = if let Some(deadline) = next {
-                terminal.read_event_timeout(deadline.remaining(Instant::now()))?
+            let event = terminal.wait_event(if self.messages.is_empty() {
+                next.map(|deadline| deadline.remaining(Instant::now()))
             } else {
-                Some(terminal.read_event()?)
-            };
+                Some(std::time::Duration::ZERO)
+            })?;
             let Some(event) = event else {
                 continue;
             };

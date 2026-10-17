@@ -16,4 +16,5 @@ pub(crate) enum Wake {
     #[cfg(windows)]
     Native,
     Timeout,
+    Notification,
 }
