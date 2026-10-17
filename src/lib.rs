@@ -6,6 +6,11 @@
 //! Events are read synchronously with [`Terminal::read_event`],
 //! [`Terminal::read_event_timeout`], or [`Terminal::try_event`].
 //!
+//! Native Unix and Windows backends provide rendering and input/events. There
+//! are no widgets, layout engine, application framework, or async runtime. Only
+//! one terminal may exist per process, including while suspended. Restoration
+//! runs on drop and unwinding panics; forced termination and aborts bypass it.
+//!
 //! On Unix, [`Terminal::new`] opens the controlling terminal. Applications that
 //! want process standard streams can use `Terminal::from_stdio` (Unix only).
 //!
@@ -39,6 +44,9 @@ mod terminfo;
 
 pub use cell::Cell;
 pub use color::{Color, Style};
-pub use event::{Event, InputMode, InputParser, MouseButton, MouseEvent, MouseKind, PasteEvent};
+pub use event::{
+    Event, InputMode, InputParser, MouseButton, MouseEvent, MouseKind, PasteEvent,
+    SequenceRegistrationError,
+};
 pub use key::{Key, KeyEvent, Modifiers};
 pub use terminal::{Position, Size, Terminal};

@@ -4,9 +4,9 @@ The library exposes a safe public API. Unsafe code is confined to `src/platform/
 
 ## Unix
 
-`libc` calls receive valid file descriptors and initialized Rust buffers. `MaybeUninit` values are read only after successful `tcgetattr`, `ioctl`, or `sigaction` calls. The resize self-pipe descriptors are created together, checked during setup, and closed in `Drop`; the backend is the sole owner. Borrowed event descriptors cannot outlive the backend. The SIGWINCH callback loads one atomic descriptor and performs a one-byte `write`, which is async-signal-safe. The atomic is set to `-1` before the pipe is closed. Only one terminal can own the process signal handler at a time.
+`libc` calls receive valid file descriptors and initialized Rust buffers. `MaybeUninit` values are read only after successful `tcgetattr`, `ioctl`, or `sigaction` calls. The resize self-pipe descriptors are created together, checked during setup, and closed in `Drop`; the backend is the sole owner. Borrowed event descriptors cannot outlive the backend. The SIGWINCH callback loads one atomic descriptor and performs a one-byte `write`, which is async-signal-safe. The handler preserves thread-local errno. The atomic is set to `-1` before the pipe is closed, and teardown waits for in-flight handlers before closing descriptors so they cannot write to a reused descriptor. A RAII lease releases process ownership exactly once after all descriptor cleanup, including failed initialization. Only one terminal can own the process signal handler at a time.
 
-`from_stdio()` borrows process descriptors; callers must keep them open while the terminal exists. `new()` and `from_fds()` own their terminal descriptors. The terminal mode is restored before owned descriptors are dropped.
+`from_stdio()` borrows process descriptors; callers must keep them open while the terminal exists. `new()` and `from_fds()` own their terminal descriptors. The terminal mode is restored before owned descriptors are dropped. Reads, writes, and termios changes retry EINTR. Partial suspend failures retain an outstanding-cleanup flag for drop/resume retries; the terminal is considered suspended during partial restoration. Mouse configuration while suspended is deferred until resume.
 
 ## Windows
 
@@ -25,3 +25,19 @@ Tests use `CREATE_NEW_CONSOLE`, verify attachment via `GetConsoleProcessList`, a
 ## Remaining risk
 
 Signal ownership is process global. Code outside terra-term that replaces SIGWINCH while a `Terminal` exists may have its handler overwritten during restoration. On Windows, unrelated code or another process attached to the same console can still change console-global modes/code pages or consume its input. The lease coordinates this crate's terminal instances only. Forced process termination, aborting panics, or detaching the console cannot guarantee restoration.
+
+## Foreground child API (2026-10-06)
+
+Unix `Backend::run_command` duplicates owned controlling-terminal descriptors,
+saves SIGTTOU disposition and foreground group, and creates a private child group.
+Its pre_exec callback uses only async-signal-safe libc functions to claim the
+terminal and restore the child's signal disposition before exec. The parent
+restores foreground ownership and signal disposition on both spawn/wait failure
+and success. Terminal::run_command attempts resume even after suspend/child error.
+The single terminal lease owns this process-wide lifecycle.
+
+Windows adds/removes a fixed function console handler around child wait. It only
+handles Ctrl+C/Break in the parent; children do not inherit function handlers.
+This remains native Windows runtime acceptance work despite GNU compilation.
+Existing PTY failure restoration plus TDX's foreground-child PTY checks provide
+Unix evidence. There is no terminal mode/signal duplication in TDX.

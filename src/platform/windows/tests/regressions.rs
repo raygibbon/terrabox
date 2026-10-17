@@ -400,7 +400,10 @@ fn all_mouse_button_transitions() {
         (3, 1, vec![(MouseButton::Right, MouseKind::Release)]),
         (3, 3, vec![]),
     ] {
-        let mut previous = MouseState { buttons: from, ..Default::default() };
+        let mut previous = MouseState {
+            buttons: from,
+            ..Default::default()
+        };
         let events = mouse_events(
             MOUSE_EVENT_RECORD {
                 dwButtonState: to,
@@ -443,7 +446,10 @@ fn mouse_edges_resized_viewports_drag_and_wheels() {
                 (MOUSE_WHEELED, 120 << 16, MouseKind::Scroll),
                 (MOUSE_HWHEELED, 120 << 16, MouseKind::Scroll),
             ] {
-                let mut state = MouseState { buttons: buttons & 0x1f, ..Default::default() };
+                let mut state = MouseState {
+                    buttons: buttons & 0x1f,
+                    ..Default::default()
+                };
                 let events = mouse_events(
                     MOUSE_EVENT_RECORD {
                         dwMousePosition: COORD { X: x, Y: y },

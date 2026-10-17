@@ -18,6 +18,7 @@ pub struct Position {
 }
 
 /// Owns the terminal mode and restores it on drop.
+/// Only one instance may exist per process, including while suspended.
 pub struct Terminal {
     backend: Backend,
     back: Buffer,
@@ -66,7 +67,9 @@ impl Terminal {
     fn from_backend(backend: Backend, caps: Capabilities) -> io::Result<Self> {
         let mut parser = InputParser::new();
         for (seq, key) in &caps.keys {
-            parser.add_key_sequence(seq, *key);
+            parser
+                .add_key_sequence(seq, *key)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         }
         let size = backend.size()?;
         let back = Buffer::new(size);
@@ -291,7 +294,21 @@ impl Terminal {
         self.suspended = !self.backend.is_active();
         result
     }
+    /// Run a child on the real terminal, restoring this terminal even when
+    /// spawning/waiting fails. Unix transfers foreground process-group control;
+    /// Windows protects the parent from the child's console Ctrl+C events.
+    pub fn run_command(
+        &mut self,
+        command: &mut std::process::Command,
+    ) -> io::Result<std::process::ExitStatus> {
+        let suspended = self.suspend();
+        let result = suspended.and_then(|()| self.backend.run_command(command));
+        let restored = self.resume();
+        restored?;
+        result
+    }
     /// Re-enter raw alternate-screen mode and request a full redraw.
+    /// Retains cells at the same size; a changed size clears the buffer.
     pub fn resume(&mut self) -> io::Result<()> {
         if !self.suspended {
             return Ok(());
@@ -299,9 +316,11 @@ impl Terminal {
         self.backend.resume()?;
         self.suspended = false;
         let size = self.backend.size()?;
-        self.back.resize(size);
-        self.back.clear_with_style(self.clear_style);
-        self.front = self.back.cells.clone();
+        if size != self.back.size {
+            self.back.resize(size);
+            self.back.clear_with_style(self.clear_style);
+            self.front = self.back.cells.clone();
+        }
         self.invalid = true;
         if self.mouse_enabled {
             self.backend.set_mouse(true)?;

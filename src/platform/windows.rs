@@ -334,6 +334,24 @@ impl Backend {
         }
         Ok(())
     }
+    pub fn run_command(
+        &mut self,
+        command: &mut std::process::Command,
+    ) -> io::Result<std::process::ExitStatus> {
+        unsafe extern "system" fn parent_interrupt(event: u32) -> i32 {
+            i32::from(event == CTRL_C_EVENT || event == CTRL_BREAK_EVENT)
+        }
+        // SAFETY: fixed handler contains no state and is removed after child wait.
+        // Function handlers are not inherited by children (unlike NULL ignore).
+        if unsafe { SetConsoleCtrlHandler(Some(parent_interrupt), 1) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let result = command.status();
+        if unsafe { SetConsoleCtrlHandler(Some(parent_interrupt), 0) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        result
+    }
     pub fn suspend(&mut self) -> io::Result<()> {
         if !self.needs_restore {
             return Ok(());

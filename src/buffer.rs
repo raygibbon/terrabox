@@ -247,4 +247,47 @@ mod tests {
         assert_eq!(b.cells[1].cell.style, style);
         assert!(!b.set_cell_style(1, 0, style));
     }
+    #[test]
+    fn wide_clipping_and_overlaps_preserve_row_boundaries() {
+        let mut b = Buffer::new(Size {
+            width: 4,
+            height: 2,
+        });
+        b.put_str(0, 0, "界界", Style::default());
+        b.put_char(0, 1, 'x', Style::default());
+        b.put_char(3, 0, '界', Style::default());
+        assert_eq!(b.cell(2, 0).unwrap().scalar(), '界');
+        assert!(b.cell(3, 0).is_none());
+        assert_eq!(b.cell(0, 1).unwrap().scalar(), 'x');
+        b.put_char(1, 0, '界', Style::default());
+        assert_eq!(b.cell(0, 0).unwrap().scalar(), ' ');
+        assert_eq!(b.cell(1, 0).unwrap().scalar(), '界');
+        assert!(b.cell(2, 0).is_none());
+        assert_eq!(b.cell(3, 0).unwrap().scalar(), ' ');
+        assert_eq!(b.cell(0, 1).unwrap().scalar(), 'x');
+    }
+
+    #[test]
+    fn extending_to_wide_cluster_marks_row_dirty_and_clips_atomically() {
+        let mut b = Buffer::new(Size {
+            width: 3,
+            height: 1,
+        });
+        b.put_char(0, 0, '❤', Style::default());
+        b.put_char(2, 0, '❤', Style::default());
+        let front = b.cells.clone();
+        assert!(!b.extend_cell(2, 0, "\u{fe0f}"));
+        assert_eq!(b.cells, front);
+        assert!(b.extend_cell(0, 0, "\u{fe0f}"));
+        assert_eq!(b.cell(0, 0).unwrap().text(), "❤️");
+        assert!(b.cell(1, 0).is_none());
+        assert_eq!(b.dirty_rows(&front, false), vec![0]);
+        b.resize(Size {
+            width: 0,
+            height: 0,
+        });
+        b.put_str(0, 0, "界", Style::default());
+        assert!(b.cells.is_empty());
+        assert!(b.dirty_rows(&[], true).is_empty());
+    }
 }

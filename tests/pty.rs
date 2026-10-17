@@ -5,7 +5,7 @@ use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::process::Command;
 use std::time::Duration;
-use terra_term::{Event, Key, Position, Size, Style, Terminal};
+use terra_term::{Event, InputMode, Key, Modifiers, Position, Size, Style, Terminal};
 
 fn open_pty() -> io::Result<(OwnedFd, OwnedFd)> {
     let mut master = -1;
@@ -121,7 +121,19 @@ fn full_pty_lifecycle() -> io::Result<()> {
         );
         assert_eq!(termios(&slave)?.c_lflag & (libc::ICANON | libc::ECHO), 0);
         drain(&master);
+        assert!(Terminal::from_fds(clone_fd(&slave)?, clone_fd(&slave)?).is_err());
 
+        send(&master, b"\x03");
+        assert!(
+            matches!(terminal.read_event_timeout(Duration::from_secs(1))?, Some(Event::Key(key)) if key.key == Key::Char('C') && key.modifiers == Modifiers::CTRL)
+        );
+        terminal.set_input_mode(InputMode::Alt);
+        send(&master, b"\x1b\xf0\x9f");
+        assert_eq!(
+            terminal.read_event_timeout(Duration::from_secs(1))?,
+            Some(Event::UnknownSequence(b"\x1b\xf0\x9f".to_vec()))
+        );
+        terminal.set_input_mode(InputMode::Escape);
         send(&master, b"a");
         assert!(
             matches!(terminal.read_event_timeout(Duration::from_secs(1))?, Some(Event::Key(key)) if key.key == Key::Char('a'))
@@ -181,7 +193,41 @@ fn full_pty_lifecycle() -> io::Result<()> {
             termios(&slave)?.c_lflag & (libc::ICANON | libc::ECHO),
             original.c_lflag & (libc::ICANON | libc::ECHO)
         );
+        terminal.suspend()?;
+        drain(&master);
+        assert!(Terminal::from_fds(clone_fd(&slave)?, clone_fd(&slave)?).is_err());
+        assert_eq!(terminal.try_event()?, None);
+        assert!(terminal.present().is_err());
+        terminal.set_mouse_enabled(true)?;
+        assert!(
+            drain(&master).is_empty(),
+            "mouse setting wrote while suspended"
+        );
         terminal.resume()?;
+        terminal.resume()?;
+        assert!(
+            drain(&master)
+                .windows(8)
+                .any(|bytes| bytes == b"\x1b[?1006h")
+        );
+        assert_eq!(terminal.cell(1, 1).unwrap().scalar(), ' ');
+        // This PTY is deliberately not this process's controlling terminal.
+        // Foreground-child setup must fail cleanly and still restore raw mode.
+        assert!(
+            terminal
+                .run_command(&mut Command::new("/nonexistent/terra-child"))
+                .is_err()
+        );
+        assert_eq!(termios(&slave)?.c_lflag & (libc::ICANON | libc::ECHO), 0);
+        terminal.present()?;
+        terminal.put_str(1, 1, "retained", Style::default());
+        terminal.present()?;
+        terminal.suspend()?;
+        drain(&master);
+        terminal.resume()?;
+        assert_eq!(terminal.cell(1, 1).unwrap().scalar(), 'r');
+        terminal.present()?;
+        assert!(drain(&master).windows(8).any(|bytes| bytes == b"retained"));
         assert_eq!(termios(&slave)?.c_lflag & (libc::ICANON | libc::ECHO), 0);
     }
     assert_eq!(
@@ -190,6 +236,33 @@ fn full_pty_lifecycle() -> io::Result<()> {
     );
 
     let path = tty_path(&slave)?;
+    // A read-only output is a terminal but fails after raw-mode initialization.
+    let read_only = std::fs::OpenOptions::new().read(true).open(&path)?;
+    assert!(Terminal::from_fds(clone_fd(&slave)?, read_only.into()).is_err());
+    assert_termios_restored(&slave, &original)?;
+    for _ in 0..20 {
+        let mut terminal = Terminal::from_fds(clone_fd(&slave)?, clone_fd(&slave)?)?;
+        drain(&master);
+        terminal.suspend()?;
+        assert_termios_restored(&slave, &original)?;
+        terminal.resume()?;
+        drop(terminal);
+        assert_termios_restored(&slave, &original)?;
+        let output = drain(&master);
+        assert!(output.windows(8).any(|bytes| bytes == b"\x1b[?1049l"));
+        assert!(output.windows(6).any(|bytes| bytes == b"\x1b[?25h"));
+    }
+    let panic_result = std::panic::catch_unwind(|| {
+        let _terminal =
+            Terminal::from_fds(clone_fd(&slave).unwrap(), clone_fd(&slave).unwrap()).unwrap();
+        panic!("intentional PTY restoration test");
+    });
+    assert!(panic_result.is_err());
+    assert_termios_restored(&slave, &original)?;
+    drain(&master);
+    // Prove panic cleanup also releases the process-global lease.
+    drop(Terminal::from_fds(clone_fd(&slave)?, clone_fd(&slave)?)?);
+    drain(&master);
     let output = Command::new(std::env::current_exe()?)
         .arg("--exact")
         .arg("redirected_stdout_child")
@@ -232,5 +305,17 @@ fn redirected_stdout_child() -> io::Result<()> {
     terminal.present()?;
     drop(terminal);
     assert!(Terminal::from_stdio().is_err());
+    Ok(())
+}
+
+fn assert_termios_restored(fd: &OwnedFd, original: &libc::termios) -> io::Result<()> {
+    let restored = termios(fd)?;
+    assert_eq!(restored.c_iflag, original.c_iflag);
+    assert_eq!(restored.c_oflag, original.c_oflag);
+    assert_eq!(restored.c_cflag, original.c_cflag);
+    assert_eq!(restored.c_lflag, original.c_lflag);
+    assert_eq!(restored.c_cc, original.c_cc);
+    assert_eq!(restored.c_ispeed, original.c_ispeed);
+    assert_eq!(restored.c_ospeed, original.c_ospeed);
     Ok(())
 }

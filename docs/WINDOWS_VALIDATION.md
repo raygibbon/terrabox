@@ -2,6 +2,8 @@
 
 Validation date: 2026-09-18, Australia/Adelaide. Scope: native Windows and shared Rust. No other OS backend was changed or tested.
 
+Implementation notes updated on 2026-10-03: wheel events now use semantic directions, accumulate partial deltas per axis, and emit one event per notch. The host results below are historical; this hardening pass was run on Linux and does not renew native Windows sign-off.
+
 ## Readiness decision
 
 Automated correctness and release-artifact checks pass on this Windows machine. **Full 0.1.0 Windows sign-off remains pending the requested human interactive checks.** The Windows Terminal manual runner was opened, but no observations or physical input results were submitted. Do not treat automated console injection as manual testing or claim that physical Ctrl+backslash, IME, fonts, hardware mouse input or visual RGB rendering was manually verified.
@@ -52,7 +54,7 @@ Development-only machine results are in docs/windows-validation-results.json in 
 
 The registered matcher distinguishes no match, prefix, complete match, and complete match with a possible longer registration. A complete prefix waits; finish_incomplete_sequence resolves the longest completed registration on timeout. A mismatch resolves the longest completed match and leaves subsequent bytes queued. Registration order does not affect the result. Identical registrations are harmless; conflicting mappings for identical bytes produce UnknownSequence deterministically.
 
-Tests cover shorter sequences alone, two and three overlaps, every split of the longer sequence, duplicate/common prefixes, reverse registration, conflicting duplicates and immediately following events. Registrations longer than 64 bytes are rejected by the existing bounded registration API; oversized CSI input matching such an attempted registration is tested as malformed input.
+Tests cover shorter sequences alone, two and three overlaps, every split of the longer sequence, duplicate/common prefixes, reverse registration, conflicting duplicates and immediately following events. `add_key_sequence` now returns an explicit `SequenceRegistrationError` for empty, oversized, non-ESC, and lone-ESC input. Registrations longer than 64 bytes are rejected; oversized CSI input matching such an attempted registration is tested as malformed input.
 
 Oversized CSI/SS3 enters explicit discard/recovery state and emits UnknownSequence chunks of at most 64 bytes until the terminator. ESC, control or non-ASCII input interrupts recovery without being swallowed. Invalid parameters and unknown final sequences also produce UnknownSequence. No malformed payload is reinterpreted as ordinary text. Tests cover large fragmented sequences, truncation, repeated ESC, randomized parameter bytes and an immediately following valid key. Sequence state/output is bounded; feed still accepts caller-provided queued input, so callers should drain events between bounded feeds.
 
@@ -82,7 +84,7 @@ Oversized CSI/SS3 enters explicit discard/recovery state and emits UnknownSequen
 | Suspend/resume | Modes, VT output, mouse selection, dimensions, cursor and redraw recover repeatedly; suspended reads/presents behave as documented. |
 | Unsafe | Pointer extents, initialized structs, union discriminators, owned handle lifetime, callback ABI/lifetime and immediate Win32 error capture reviewed. See UNSAFE_AUDIT.md. |
 
-Horizontal wheel uses Other(4) for left and Other(5) for right; extra buttons use Other(0)/Other(1), and motion without a button uses Other(3). A wheel record produces one scroll event because the public model has no delta field. Native paste remains key records. InputMode only affects the byte parser.
+Horizontal wheel uses `WheelLeft`/`WheelRight`; extra buttons use `Back`/`Forward`, and motion without a button uses `None`. Partial native wheel deltas accumulate separately for each axis, and each full notch produces one scroll event. Native paste remains key records. InputMode only affects the byte parser.
 
 ## Attached hosts versus manual validation
 

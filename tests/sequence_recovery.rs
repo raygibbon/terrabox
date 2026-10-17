@@ -15,7 +15,7 @@ fn registered(reverse: bool) -> InputParser {
         sequences.reverse();
     }
     for (bytes, key) in sequences {
-        p.add_key_sequence(bytes, key);
+        p.add_key_sequence(bytes, key).unwrap();
     }
     p
 }
@@ -65,9 +65,9 @@ fn two_overlaps_and_identical_prefixes_keep_following_bytes() {
             entries.reverse();
         }
         for (seq, key) in entries {
-            p.add_key_sequence(seq, key);
+            p.add_key_sequence(seq, key).unwrap();
         }
-        p.add_key_sequence(b"\x1bXY", Key::Home);
+        p.add_key_sequence(b"\x1bXY", Key::Home).unwrap();
         p.feed(b"\x1bXY");
         assert_eq!(p.next_event(), None);
         p.feed(b"q");
@@ -83,7 +83,7 @@ fn conflicting_identical_registration_is_order_independent() {
     for keys in [[Key::Home, Key::End], [Key::End, Key::Home]] {
         let mut p = InputParser::new();
         for key in keys {
-            p.add_key_sequence(b"\x1bXY", key);
+            p.add_key_sequence(b"\x1bXY", key).unwrap();
         }
         p.feed(b"\x1bXYq");
         assert_eq!(
@@ -138,7 +138,10 @@ fn oversized_registration_is_rejected_and_input_recovers() {
     sequence.extend(vec![b'1'; 80]);
     sequence.push(b'~');
     let mut p = InputParser::new();
-    p.add_key_sequence(&sequence, Key::Function(24));
+    assert_eq!(
+        p.add_key_sequence(&sequence, Key::Function(24)),
+        Err(terra_term::SequenceRegistrationError::TooLong)
+    );
     p.feed(&sequence);
     assert_eq!(collect_unknown(&mut p), sequence);
     p.feed(b"z");
@@ -203,4 +206,95 @@ fn random_escape_parameters_never_swallow_the_next_key() {
         assert_eq!(p.next_event(), event(Key::Function(1)));
         assert_eq!(p.next_event(), event(Key::Char('x')));
     }
+}
+
+#[test]
+fn registration_validates_input_without_changing_existing_keys() {
+    use terra_term::SequenceRegistrationError::{Empty, InvalidEscapeSequence, TooLong};
+    let mut p = InputParser::new();
+    assert_eq!(p.add_key_sequence(b"", Key::Home), Err(Empty));
+    for sequence in [b"x".as_slice(), b"\x1b", b"plain"] {
+        assert_eq!(
+            p.add_key_sequence(sequence, Key::Home),
+            Err(InvalidEscapeSequence)
+        );
+    }
+    assert_eq!(p.add_key_sequence(&[27; 65], Key::Home), Err(TooLong));
+    for sequence in [b"\x1bX".as_slice(), &[27; 64]] {
+        assert_eq!(p.add_key_sequence(sequence, Key::End), Ok(()));
+        p.feed(sequence);
+        assert_eq!(p.next_event(), event(Key::End));
+    }
+    assert_eq!(p.add_key_sequence(b"", Key::Home), Err(Empty));
+    p.feed(b"\x1bXq");
+    assert_eq!(p.next_event(), event(Key::End));
+    assert_eq!(p.next_event(), event(Key::Char('q')));
+}
+
+#[test]
+fn malformed_legacy_sequences_preserve_following_escape() {
+    for prefix in [b"\x1b[M".as_slice(), b"\x1b[M ", b"\x1b[M !", b"\x1b[["] {
+        for split in 0..=prefix.len() {
+            let mut p = InputParser::new();
+            p.feed(&prefix[..split]);
+            assert_eq!(p.next_event(), None);
+            p.feed(&prefix[split..]);
+            p.feed(b"\x1b[Aq");
+            assert_eq!(
+                p.next_event(),
+                Some(Event::UnknownSequence(prefix.to_vec()))
+            );
+            assert_eq!(p.next_event(), event(Key::Up));
+            assert_eq!(p.next_event(), event(Key::Char('q')));
+        }
+    }
+}
+
+#[test]
+fn truncated_alt_unicode_can_finish_and_valid_pairs_survive_splits() {
+    let mut p = InputParser::new();
+    p.set_mode(terra_term::InputMode::Alt);
+    p.feed(b"\x1b\xf0\x9f");
+    assert_eq!(p.next_event(), None);
+    assert!(p.pending_sequence());
+    assert_eq!(
+        p.finish_incomplete_sequence(),
+        Some(Event::UnknownSequence(b"\x1b\xf0\x9f".to_vec()))
+    );
+    p.feed(b"q");
+    assert_eq!(p.next_event(), event(Key::Char('q')));
+    for split in 1..5 {
+        let mut p = InputParser::new();
+        p.set_mode(terra_term::InputMode::Alt);
+        let bytes = "\x1b🦀".as_bytes();
+        p.feed(&bytes[..split]);
+        assert_eq!(p.next_event(), None);
+        p.feed(&bytes[split..]);
+        assert_eq!(
+            p.next_event(),
+            Some(Event::Key(KeyEvent::new(Key::Char('🦀'), Modifiers::ALT)))
+        );
+    }
+}
+
+#[test]
+fn paste_precedence_clears_a_pending_registration_prefix() {
+    let mut p = InputParser::new();
+    p.add_key_sequence(b"\x1b[200~X", Key::Home).unwrap();
+    p.feed(b"\x1b[20");
+    assert_eq!(p.next_event(), None);
+    assert!(p.pending_sequence());
+    p.feed(b"0~paste\x1b[201~");
+    assert!(
+        matches!(p.next_event(), Some(Event::Paste(paste)) if paste.bytes == b"paste" && paste.complete)
+    );
+    p.feed(b"\x1b[123;");
+    assert_eq!(p.next_event(), None);
+    assert_eq!(
+        p.finish_incomplete_sequence(),
+        Some(Event::UnknownSequence(b"\x1b[123;".to_vec()))
+    );
+    assert_eq!(p.next_event(), None);
+    p.feed(b"q");
+    assert_eq!(p.next_event(), event(Key::Char('q')));
 }

@@ -148,7 +148,7 @@ fn registered_arbitrary_escape_sequence_survives_fragmentation() {
     let sequence = b"\x1bXYZ!";
     for split in 2..sequence.len() {
         let mut parser = InputParser::new();
-        parser.add_key_sequence(sequence, Key::Function(9));
+        parser.add_key_sequence(sequence, Key::Function(9)).unwrap();
         parser.feed(&sequence[..split]);
         assert_eq!(parser.next_event(), None, "split at {split}");
         assert!(parser.pending_sequence());
@@ -159,7 +159,7 @@ fn registered_arbitrary_escape_sequence_survives_fragmentation() {
         );
     }
     let mut parser = InputParser::new();
-    parser.add_key_sequence(sequence, Key::Function(9));
+    parser.add_key_sequence(sequence, Key::Function(9)).unwrap();
     parser.feed(b"\x1bXY");
     assert_eq!(parser.next_event(), None);
     parser.feed(b"q");
@@ -216,4 +216,25 @@ fn multiple_events_in_one_read_keep_order() {
         events[9],
         Event::Key(KeyEvent::new(Key::Char('z'), Modifiers::NONE))
     );
+}
+
+#[test]
+fn replacement_character_is_one_key_and_invalid_utf8_makes_progress() {
+    let mut parser = InputParser::new();
+    parser.feed("�q".as_bytes());
+    for ch in ['�', 'q'] {
+        assert_eq!(
+            parser.next_event(),
+            Some(Event::Key(KeyEvent::new(Key::Char(ch), Modifiers::NONE)))
+        );
+    }
+    assert_eq!(parser.next_event(), None);
+    parser.feed(b"\xf0q");
+    for ch in ['�', 'q'] {
+        assert_eq!(
+            parser.next_event(),
+            Some(Event::Key(KeyEvent::new(Key::Char(ch), Modifiers::NONE)))
+        );
+    }
+    assert_eq!(parser.next_event(), None);
 }

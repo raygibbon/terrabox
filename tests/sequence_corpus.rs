@@ -60,3 +60,40 @@ fn large_paste_is_chunked_without_key_interpretation() {
     assert_eq!(&last.bytes[21..], b"\x1b[A");
     assert!(last.complete);
 }
+
+#[test]
+fn paste_preserves_arbitrary_bytes_at_chunk_and_delimiter_boundaries() {
+    let mut payload = vec![0xff; 1024 * 1024 - 2];
+    payload.extend_from_slice(b"\x1b[201x\x00\xc0\x80\xfe\n");
+    for split in 0..=6 {
+        let mut parser = InputParser::new();
+        parser.feed(b"\x1b[200~");
+        parser.feed(&payload);
+        parser.feed(&b"\x1b[201~"[..split]);
+        let mut recovered = Vec::new();
+        while let Some(event) = parser.next_event() {
+            let Event::Paste(paste) = event else {
+                panic!("paste became another event")
+            };
+            assert!(paste.bytes.len() <= 1024 * 1024);
+            recovered.extend(paste.bytes);
+            if paste.complete {
+                assert_eq!(split, 6);
+            }
+        }
+        if split < 6 {
+            parser.feed(&b"\x1b[201~"[split..]);
+            let Some(Event::Paste(paste)) = parser.next_event() else {
+                panic!("missing final paste")
+            };
+            assert!(paste.complete);
+            recovered.extend(paste.bytes);
+        }
+        assert_eq!(recovered, payload);
+        parser.feed(b"q");
+        assert_eq!(
+            parser.next_event(),
+            Some(Event::Key(KeyEvent::new(Key::Char('q'), Modifiers::NONE)))
+        );
+    }
+}

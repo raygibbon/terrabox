@@ -71,6 +71,29 @@ const PASTE_END: &[u8] = b"\x1b[201~";
 const MAX_PASTE_CHUNK: usize = 1024 * 1024;
 const MAX_SEQUENCE: usize = 64;
 
+/// Invalid input to [`InputParser::add_key_sequence`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SequenceRegistrationError {
+    Empty,
+    TooLong,
+    /// Registrations must start with ESC and include at least one following byte.
+    InvalidEscapeSequence,
+}
+
+impl std::fmt::Display for SequenceRegistrationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Empty => "key sequence is empty",
+            Self::TooLong => "key sequence exceeds the 64-byte parser limit",
+            Self::InvalidEscapeSequence => {
+                "key sequence must start with ESC and contain at least two bytes"
+            }
+        })
+    }
+}
+
+impl std::error::Error for SequenceRegistrationError {}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum ParseState {
     #[default]
@@ -78,6 +101,7 @@ enum ParseState {
     Escape,
     Csi,
     Ss3,
+    Alt,
     Registered,
     DiscardSequence,
     Paste,
@@ -94,6 +118,9 @@ enum RegisteredMatch {
 /// Incremental parser. Only a *lone* ESC is timing-sensitive. Once `[` or `O`
 /// follows, the sequence remains pending across arbitrary read boundaries.
 /// Unknown or oversized sequences consume bytes and always make progress.
+/// Callers resolve pending sequences with `finish_incomplete_sequence` (the
+/// terminal uses 500 ms). `feed` queues caller-supplied input; drain events
+/// between bounded feeds. Paste events contain at most 1 MiB of arbitrary bytes.
 #[derive(Default)]
 pub struct InputParser {
     bytes: VecDeque<u8>,
@@ -114,15 +141,29 @@ impl InputParser {
     pub fn mode(&self) -> InputMode {
         self.mode
     }
-    /// Register an escape sequence of at most 64 bytes. Longest matches win;
+    /// Register an ESC-prefixed sequence of 2 to 64 bytes. Longest matches win;
     /// ambiguous complete prefixes wait for more input or an explicit finish.
     /// Conflicting identical registrations are treated as unknown, independent
     /// of registration order. Repeating the same registration is harmless.
-    pub fn add_key_sequence(&mut self, bytes: &[u8], key: Key) {
-        if !bytes.is_empty() && bytes.len() <= MAX_SEQUENCE {
-            self.key_caps.push((bytes.to_vec(), key));
-            self.key_caps.sort_by_key(|b| std::cmp::Reverse(b.0.len()));
+    /// The bracketed-paste opening delimiter takes precedence over registrations.
+    /// Invalid input returns an error without changing existing registrations.
+    pub fn add_key_sequence(
+        &mut self,
+        bytes: &[u8],
+        key: Key,
+    ) -> Result<(), SequenceRegistrationError> {
+        if bytes.is_empty() {
+            return Err(SequenceRegistrationError::Empty);
         }
+        if bytes.len() > MAX_SEQUENCE {
+            return Err(SequenceRegistrationError::TooLong);
+        }
+        if bytes.len() < 2 || bytes[0] != 0x1b {
+            return Err(SequenceRegistrationError::InvalidEscapeSequence);
+        }
+        self.key_caps.push((bytes.to_vec(), key));
+        self.key_caps.sort_by_key(|b| std::cmp::Reverse(b.0.len()));
+        Ok(())
     }
     pub fn feed(&mut self, bytes: &[u8]) {
         self.bytes.extend(bytes);
@@ -136,6 +177,7 @@ impl InputParser {
             ParseState::Csi
                 | ParseState::Ss3
                 | ParseState::Registered
+                | ParseState::Alt
                 | ParseState::DiscardSequence
         )
     }
@@ -191,6 +233,7 @@ impl InputParser {
                 }
                 if self.prefix(PASTE_START) {
                     self.drain(PASTE_START.len());
+                    self.registered_prefix_len = 0;
                     self.state = ParseState::Paste;
                     continue;
                 }
@@ -249,6 +292,7 @@ impl InputParser {
                 }
                 if self.mode == InputMode::Alt {
                     if !self.utf8_ready(1) {
+                        self.state = ParseState::Alt;
                         return None;
                     }
                     self.bytes.pop_front();
@@ -344,7 +388,12 @@ impl InputParser {
         (count > 0).then(|| Event::UnknownSequence(self.bytes.drain(..count).collect()))
     }
     fn parse_paste(&mut self) -> Option<Event> {
-        let bytes: Vec<u8> = self.bytes.iter().copied().collect();
+        let bytes: Vec<u8> = self
+            .bytes
+            .iter()
+            .take(MAX_PASTE_CHUNK + PASTE_END.len())
+            .copied()
+            .collect();
         if let Some(pos) = bytes.windows(PASTE_END.len()).position(|w| w == PASTE_END) {
             let capacity = MAX_PASTE_CHUNK.saturating_sub(self.paste.len());
             if pos > capacity {
@@ -385,6 +434,12 @@ impl InputParser {
     fn parse_escape_sequence(&mut self) -> Option<Event> {
         let is_csi = self.bytes[1] == b'[';
         if is_csi && self.bytes.get(2) == Some(&b'M') {
+            // Invalid payload bytes (especially ESC) must not swallow the next key.
+            if let Some(end) =
+                (3..self.bytes.len().min(6)).find(|&i| self.bytes[i] < if i == 3 { 32 } else { 33 })
+            {
+                return Some(Event::UnknownSequence(self.bytes.drain(..end).collect()));
+            }
             if self.bytes.len() < 6 {
                 return None;
             }
@@ -398,6 +453,9 @@ impl InputParser {
         if is_csi && self.bytes.get(2) == Some(&b'[') {
             if self.bytes.len() < 4 {
                 return None;
+            }
+            if !(0x40..=0x7e).contains(&self.bytes[3]) {
+                return Some(Event::UnknownSequence(self.bytes.drain(..3).collect()));
             }
             let key = match self.bytes[3] {
                 b'A'..=b'E' => Some(Key::Function(self.bytes[3] - b'A' + 1)),
@@ -526,7 +584,11 @@ impl InputParser {
             0xf0..=0xf4 => 4,
             _ => 1,
         };
-        self.bytes.len() >= offset + n
+        let candidate: Vec<u8> = self.bytes.iter().skip(offset).take(n).copied().collect();
+        match std::str::from_utf8(&candidate) {
+            Ok(_) => true,
+            Err(error) => error.error_len().is_some(),
+        }
     }
     fn next_key(&mut self, modifiers: Modifiers) -> Option<Event> {
         let b = *self.bytes.front()?;
@@ -554,11 +616,9 @@ impl InputParser {
                     _ => 1,
                 };
                 let candidate: Vec<u8> = self.bytes.iter().take(n).copied().collect();
-                let ch = std::str::from_utf8(&candidate)
-                    .ok()
-                    .and_then(|s| s.chars().next())
-                    .unwrap_or('\u{fffd}');
-                self.drain(if ch == '\u{fffd}' { 1 } else { n });
+                let decoded = std::str::from_utf8(&candidate).ok();
+                let ch = decoded.and_then(|s| s.chars().next()).unwrap_or('\u{fffd}');
+                self.drain(if decoded.is_some() { n } else { 1 });
                 Key::Char(ch)
             }
         };

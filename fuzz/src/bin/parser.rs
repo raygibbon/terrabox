@@ -7,8 +7,8 @@ fn main() -> io::Result<()> {
     io::stdin().take(1024 * 1024).read_to_end(&mut input)?;
     for chunk_size in [1, 2, 3, 7, 64, 4096] {
         let mut parser = InputParser::new();
-        parser.add_key_sequence(b"\x1bXYZ!", Key::Function(9));
-        parser.add_key_sequence(b"\x1b[1;5A", Key::Up);
+        parser.add_key_sequence(b"\x1bXYZ!", Key::Function(9)).unwrap();
+        parser.add_key_sequence(b"\x1b[1;5A", Key::Up).unwrap();
         for chunk in input.chunks(chunk_size) {
             parser.feed(chunk);
             for _ in 0..=chunk.len() {
