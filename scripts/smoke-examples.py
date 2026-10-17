@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Unix PTY smoke checks for real example binaries; standard library only.
 
-Build with `cargo build --workspace --examples` first. Checks exit codes,
+Build with `cargo build --workspace --examples` first.
+Set TERRABOX_SMOKE_TERM to check another database or fallback name. Checks exit codes,
 terminal restoration, input during background work, resize and Linux idle ticks.
 """
 import fcntl
@@ -17,6 +18,7 @@ import termios
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
+SMOKE_TERM = os.environ.get("TERRABOX_SMOKE_TERM", "xterm-256color")
 
 def smoke(name, arguments, interactions, idle=False):
     master, slave = pty.openpty()
@@ -27,7 +29,7 @@ def smoke(name, arguments, interactions, idle=False):
         fcntl.ioctl(0, termios.TIOCSCTTY, 0)
     process = subprocess.Popen([str(ROOT / "target/debug/examples" / name), *arguments],
         stdin=slave, stdout=slave, stderr=slave, preexec_fn=connect,
-        env={**os.environ, "TERM": "xterm-256color"})
+        env={**os.environ, "TERM": SMOKE_TERM})
     output = bytearray()
     def drain(duration):
         until = time.monotonic() + duration

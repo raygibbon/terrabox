@@ -1,26 +1,28 @@
 # Third-party notices
 
-The built-in terminal capability tables in `src/terminfo/builtins.rs` retain sequence data adapted from the termbox2 header. The implementation, parser, terminal backends, and public API are Rust code developed for terrabox. The adapted tables remain under the source project's MIT terms below.
+TerraBox is distributed under its accompanying MIT `LICENSE`. The current crate
+does not vendor third-party terminal capability tables or a terminal database.
+Its small output fallback implements documented terminal protocols. Test
+fixtures are synthetic TerraBox fixtures, not copies of terminal descriptions.
+The repository's `docs/terminal-capability-audit.md` records the provenance review
+and historical changes; repository history has not been rewritten.
 
-MIT License
+## Dependencies
 
-Copyright (c) 2015-2026 Adam Saponara <as@php.net>
-              2010-2020 nsf <no.smile.face@gmail.com>
+Current locked dependencies retain their own copyright notices and licences:
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+| Package | Version | Declared licence |
+|---|---|---|
+| libc | 0.2.189 | MIT OR Apache-2.0 |
+| unicode-segmentation | 1.13.3 | MIT OR Apache-2.0 |
+| unicode-width | 0.2.2 | MIT OR Apache-2.0 |
+| windows-sys | 0.61.2 | MIT OR Apache-2.0 |
+| windows-link | 0.2.1 | MIT OR Apache-2.0 |
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Cargo resolves these packages separately. This inventory does not replace the
+notices and licence files supplied with each dependency. Preserve those notices
+when distributing their code or binaries as required by the selected licence.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+Unix terminfo entries are read from the user's installed database, not bundled
+with TerraBox. Redistributors who bundle a database must review its licensing
+separately. No ncurses linking or runtime utility is required by the library.

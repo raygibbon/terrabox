@@ -480,7 +480,11 @@ mod tests {
         // SAFETY: openpty transferred ownership of both descriptors.
         let master = unsafe { OwnedFd::from_raw_fd(master) };
         let slave = unsafe { OwnedFd::from_raw_fd(slave) };
-        let backend = Backend::from_fds(slave.try_clone()?, slave, Capabilities::builtin("xterm"))?;
+        let backend = Backend::from_fds(
+            slave.try_clone()?,
+            slave,
+            Capabilities::fallback("xterm").unwrap(),
+        )?;
         // Fill the nonblocking resize pipe so the handler's write sets EAGAIN.
         let bytes = [1u8; 4096];
         // SAFETY: the backend owns the write descriptor and bytes is readable.

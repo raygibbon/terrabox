@@ -35,6 +35,29 @@ release workload and Unicode boundary comparison validate this change. Hardware
 terminal scroll commands are deferred until front-buffer synchronisation and
 capability fallbacks have dedicated tests.
 
+## Terminal capabilities and provenance
+
+Unix loads installed compiled terminfo strings first, honoring environment and
+system search paths and both character/hex directory layouts. The reader
+supports standard strings with either numeric width, bounds reads and rejects
+malformed offsets. Database entries remain authoritative; cancelled/missing
+fields are not filled from an assumed family. Usable cursor addressing and
+screen clearing are checked before entering raw mode.
+
+Without a usable entry, a small output builder supplies documented core VT
+operations for an explicit compatibility allowlist. Linux uses the main screen;
+older rxvt/Eterm use legacy buffer switching; other allowed modern VT names use
+saved alternate buffers. Standard function/navigation input is decoded by the
+existing parser, with one Linux BackTab registration. Windows uses documented
+VT output and native input independently of Unix databases. No ncurses linking,
+new crate or vendored capability dataset is needed.
+
+The former adapted family arrays and positional mapping were removed. The
+[terminal capability audit](terminal-capability-audit.md) records source
+references, retained-code review, fallback limitations, historical credit and
+the basis for updating active third-party notices. TERM selects a compatibility
+policy, not proof of graphics, truecolour or extended keyboard support.
+
 ## Retained state and layout
 
 TerraTUI retains a Desktop of windows with stable WindowId values and boxed

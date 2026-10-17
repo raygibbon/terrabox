@@ -31,7 +31,7 @@ terrabox is synchronous and ends at the terminal abstraction. It is not a widget
 
 On Windows, use a console attached to stdin and stdout (Windows Terminal is recommended). Redirected streams are rejected. The backend owns duplicate console handles and permits one `Terminal` per process, including while suspended. Native C0 characters use the shared normalization: Ctrl+H is Backspace, Ctrl+I is Tab, Ctrl+J/Ctrl+M are Enter, and Ctrl+[ is Escape. Ctrl+\\ is `Char('\\')` with Ctrl. Ctrl+C arrives as a key; Ctrl+Break is consumed as a Windows signal while active, with no key event. Suspend/drop removes that signal handler. `InputMode` affects the byte parser, not native console records. Paste arrives as key records. See the [Windows validation report](WINDOWS_VALIDATION.md) for tested hosts, build commands, and native input details.
 
-Build with `cargo build -p terrabox` using a normal Rust toolchain. No C compiler, terminal development headers, or external terminal utility is required. The crate is MIT licensed; adapted built-in terminal sequence data retains its required notice in [third-party notices](../THIRD_PARTY_NOTICES.md).
+Build with `cargo build -p terrabox` using a normal Rust toolchain. No C compiler, terminal development headers, or external terminal utility is required. The crate is MIT licensed; dependencies retain their licences in [third-party notices](../THIRD_PARTY_NOTICES.md). The [capability audit](terminal-capability-audit.md) documents replacement of the historical tables.
 
 ### Foreground child lifecycle
 

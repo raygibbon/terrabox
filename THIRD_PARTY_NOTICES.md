@@ -1,26 +1,28 @@
 # Third-party notices
 
-The built-in terminal capability tables in `crates/terrabox/src/terminfo/builtins.rs` retain sequence data adapted from the termbox2 header. The implementation, parser, terminal backends, and public API are Rust code developed for terrabox. The adapted tables remain under the source project's MIT terms below.
+TerraBox and TerraTUI are distributed under the repository's MIT licence.
+The current crates do not vendor third-party terminal capability tables or a
+terminal capability database. The capability replacement and provenance scope
+are documented in [the audit](docs/terminal-capability-audit.md).
 
-MIT License
+## Rust dependencies
 
-Copyright (c) 2015-2026 Adam Saponara <as@php.net>
-              2010-2020 nsf <no.smile.face@gmail.com>
+The following dependency versions occur in the current lockfile. Their own
+copyright notices and licence texts remain applicable to their code:
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+| Package | Version | Declared licence |
+|---|---|---|
+| libc | 0.2.189 | MIT OR Apache-2.0 |
+| unicode-segmentation | 1.13.3 | MIT OR Apache-2.0 |
+| unicode-width | 0.2.2 | MIT OR Apache-2.0 |
+| windows-sys | 0.61.2 | MIT OR Apache-2.0 |
+| windows-link | 0.2.1 | MIT OR Apache-2.0 |
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+These dependencies are resolved by Cargo; their source is not copied into this
+repository. Preserve their supplied notices when redistributing their code or
+binaries, as required by the selected licence. This inventory does not replace
+the licence files supplied with each dependency.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+System terminfo files are read from the user's installation at runtime; no
+ncurses implementation or database is bundled. A distributor separately
+bundling a terminal database must review that database's licences.

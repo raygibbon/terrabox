@@ -20,7 +20,15 @@ fn main() -> std::io::Result<()> {
 ```
 
 See the repository documentation for platform limitations and validation scope.
-Adapted termbox2 capability data is covered by THIRD_PARTY_NOTICES.md.
+Dependency licences are recorded in THIRD_PARTY_NOTICES.md.
+
+Unix prefers installed terminfo entries for cursor positioning, screen/cursor
+modes, attributes and keyboard registrations. Its small specification-based
+fallback supplies only core VT operations for recognised compatibility names;
+unknown names without usable entries fail before terminal mode changes. Windows
+uses native console input and documented VT output without a Unix database.
+No ncurses dependency or terminal database is bundled. See the repository
+`docs/terminal-capability-audit.md` for fallback details and provenance limits.
 
 For off-screen drawing, create `Surface::new(size)` and obtain a local
 `surface.canvas(Rect::new(x, y, width, height))`. Canvases clip nested views and

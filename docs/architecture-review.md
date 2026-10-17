@@ -1,5 +1,10 @@
 # Repository audit — 2026-10-17
 
+Historical workspace-migration review. References below to adapted tables and
+required notices describe that earlier source state. The subsequent
+[capability audit](terminal-capability-audit.md) records their replacement and
+current attribution decision.
+
 ## Scope and preservation
 
 Inspected the existing engine, Navi8or (C implementation and experimental Rust

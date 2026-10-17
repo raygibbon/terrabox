@@ -60,6 +60,12 @@ applications own files, documents and business operations. Rendering runs on
 request. Terminal presentation compares changed rows with the previous frame.
 The logical desktop frame is rebuilt on redraw; there is no scene cache.
 
+On Unix, terminal operations come from the installed terminfo database first.
+A small specification-based VT fallback covers documented compatibility names;
+unknown names without a usable entry fail safely. Windows uses its native
+backend and documented VT output without requiring terminfo or ncurses.
+See [capabilities and provenance](docs/terminal-capability-audit.md).
+
 [Architecture](docs/architecture.md) · [Framework guide](docs/TERRATUI.md) ·
 [Engine guide](docs/ENGINE.md)
 
@@ -133,5 +139,6 @@ animation uses timed cell drawing. [Roadmap](docs/roadmap.md).
 
 ## License
 
-MIT. Existing copyright and adapted termbox2 capability-table notices are
-preserved in [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+MIT. See [LICENSE](LICENSE) and [dependency notices](THIRD_PARTY_NOTICES.md).
+The [capability provenance audit](docs/terminal-capability-audit.md) records the
+replacement of the historical adapted tables and the scope of the review.

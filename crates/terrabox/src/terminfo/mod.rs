@@ -1,7 +1,7 @@
 //! Small reader for compiled terminfo's standard string section.
 use crate::Key;
-mod builtins;
 mod expand;
+mod fallback;
 use std::io;
 #[cfg(not(windows))]
 use std::{
@@ -9,32 +9,29 @@ use std::{
     path::{Path, PathBuf},
 };
 
+// Standard compiled-string offsets, checked against ncurses term.h and term(5).
+// These are ABI identifiers, not copied terminal descriptions.
 #[cfg(any(not(windows), test))]
-const KEYS: &[(usize, Key)] = &[
-    (66, Key::Function(1)),
-    (68, Key::Function(2)),
-    (69, Key::Function(3)),
-    (70, Key::Function(4)),
-    (71, Key::Function(5)),
-    (72, Key::Function(6)),
-    (73, Key::Function(7)),
-    (74, Key::Function(8)),
-    (75, Key::Function(9)),
-    (67, Key::Function(10)),
-    (216, Key::Function(11)),
-    (217, Key::Function(12)),
-    (77, Key::Insert),
-    (59, Key::Delete),
-    (76, Key::Home),
-    (164, Key::End),
-    (82, Key::PageUp),
-    (81, Key::PageDown),
-    (87, Key::Up),
-    (61, Key::Down),
-    (79, Key::Left),
-    (83, Key::Right),
-    (148, Key::BackTab),
-];
+fn key_index(key: Key) -> usize {
+    match key {
+        Key::Function(1) => 66,
+        Key::Function(10) => 67,
+        Key::Function(n @ 2..=9) => 66 + usize::from(n),
+        Key::Function(n @ 11..=12) => 205 + usize::from(n),
+        Key::Delete => 59,
+        Key::Down => 61,
+        Key::Home => 76,
+        Key::Insert => 77,
+        Key::Left => 79,
+        Key::PageDown => 81,
+        Key::PageUp => 82,
+        Key::Right => 83,
+        Key::Up => 87,
+        Key::BackTab => 148,
+        Key::End => 164,
+        _ => unreachable!("only database keys are requested"),
+    }
+}
 
 #[derive(Clone)]
 pub(crate) struct Capabilities {
@@ -60,28 +57,26 @@ impl Capabilities {
         {
             // The native Windows backend enables VT output; host TERM databases
             // (including Wine's) do not describe that console connection.
-            Ok(Self::builtin("xterm"))
+            Ok(fallback::output(fallback::Screen::SavedAlternate))
         }
         #[cfg(not(windows))]
         {
-            let term = env::var("TERM").unwrap_or_default();
+            let term = match env::var("TERM") {
+                Ok(term) => term,
+                Err(env::VarError::NotPresent) => {
+                    return Err(io::Error::new(io::ErrorKind::NotFound, "TERM is not set"));
+                }
+                Err(env::VarError::NotUnicode(_)) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "TERM is not valid UTF-8",
+                    ));
+                }
+            };
             if term.is_empty() {
                 return Err(io::Error::new(io::ErrorKind::NotFound, "TERM is not set"));
             }
-            let known = ["xterm", "linux", "screen", "tmux", "rxvt", "Eterm"]
-                .iter()
-                .any(|family| term == *family || term.starts_with(&format!("{family}-")));
-            let db = find_entry(&term);
-            if !known && db.is_none() {
-                return Err(io::Error::new(
-                    io::ErrorKind::Unsupported,
-                    format!("no usable capabilities for TERM={term}"),
-                ));
-            }
-            if let Some(db) = db {
-                return Ok(Self::from_entry(&db));
-            }
-            Ok(Self::builtin(&term))
+            Self::resolve(&term, find_entry(&term).as_deref())
         }
     }
     #[cfg(any(not(windows), test))]
@@ -100,7 +95,21 @@ impl Capabilities {
             exit_keypad: Vec::new(),
             style: std::array::from_fn(|_| Vec::new()),
         };
-        for &(index, key) in KEYS {
+        let keys = (1..=12).map(Key::Function).chain([
+            Key::Up,
+            Key::Right,
+            Key::Down,
+            Key::Left,
+            Key::Home,
+            Key::End,
+            Key::Insert,
+            Key::Delete,
+            Key::PageUp,
+            Key::PageDown,
+            Key::BackTab,
+        ]);
+        for key in keys {
+            let index = key_index(key);
             if let Some(bytes) = db.get(index).and_then(|v| v.as_ref()) {
                 result.keys.push((bytes.clone(), key));
             }
@@ -126,62 +135,41 @@ impl Capabilities {
         }
         result
     }
-    pub(crate) fn builtin(term: &str) -> Self {
-        let table = if term.contains("xterm") {
-            &builtins::XTERM
-        } else if term == "linux" {
-            &builtins::LINUX
-        } else if term.contains("screen") || term.contains("tmux") {
-            &builtins::SCREEN
-        } else if term.contains("rxvt-256color") {
-            &builtins::RXVT_256COLOR
-        } else if term.contains("rxvt") {
-            &builtins::RXVT_UNICODE
-        } else if term.contains("Eterm") {
-            &builtins::ETERM
-        } else {
-            &builtins::XTERM
-        };
-        let key = |i| match i {
-            0..=11 => Key::Function(i as u8 + 1),
-            12 => Key::Insert,
-            13 => Key::Delete,
-            14 => Key::Home,
-            15 => Key::End,
-            16 => Key::PageUp,
-            17 => Key::PageDown,
-            18 => Key::Up,
-            19 => Key::Down,
-            20 => Key::Left,
-            21 => Key::Right,
-            _ => Key::BackTab,
-        };
-        let keys = (0..23)
-            .filter(|&i| !table[i].is_empty())
-            .map(|i| (table[i].to_vec(), key(i)))
-            .collect();
-        Self {
-            keys,
-            enter_screen: table[23].to_vec(),
-            exit_screen: table[24].to_vec(),
-            show_cursor: table[25].to_vec(),
-            hide_cursor: table[26].to_vec(),
-            clear: table[27].to_vec(),
-            cursor_address: None,
-            vt_cursor_fallback: true,
-            reset: table[28].to_vec(),
-            enter_keypad: table[34].to_vec(),
-            exit_keypad: table[35].to_vec(),
-            style: [
-                table[30].to_vec(),
-                table[36].to_vec(),
-                table[29].to_vec(),
-                table[32].to_vec(),
-                table[31].to_vec(),
-                table[33].to_vec(),
-                table[37].to_vec(),
-            ],
+    #[cfg(any(not(windows), test))]
+    fn resolve(term: &str, db: Option<&[Option<Vec<u8>>]>) -> io::Result<Self> {
+        if !valid_term(term) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "TERM must be a nonempty terminal name of at most 128 ASCII bytes",
+            ));
         }
+        if let Some(db) = db {
+            let caps = Self::from_entry(db);
+            // Fail before raw mode/alternate screen if basic rendering cannot work.
+            if caps.cursor_position(0, 0)?.is_empty() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "cursor positioning capability is empty",
+                ));
+            }
+            if caps.clear.is_empty() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "screen clearing capability is absent",
+                ));
+            }
+            return Ok(caps);
+        }
+        Self::fallback(term).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                format!("no usable terminfo entry or documented fallback for TERM={term}"),
+            )
+        })
+    }
+    #[cfg(any(not(windows), test))]
+    pub(crate) fn fallback(term: &str) -> Option<Self> {
+        fallback::screen_policy(term).map(fallback::output)
     }
     pub fn cursor_position(&self, x: u16, y: u16) -> io::Result<Vec<u8>> {
         if let Some(template) = &self.cursor_address {
@@ -197,14 +185,19 @@ impl Capabilities {
         ))
     }
 }
-#[cfg(not(windows))]
-fn find_entry(term: &str) -> Option<Vec<Option<Vec<u8>>>> {
-    if term.is_empty()
-        || term.len() > 128
-        || !term
+#[cfg(any(not(windows), test))]
+fn valid_term(term: &str) -> bool {
+    !term.is_empty()
+        && term != "."
+        && term != ".."
+        && term.len() <= 128
+        && term
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"._+-".contains(&b))
-    {
+}
+#[cfg(not(windows))]
+fn find_entry(term: &str) -> Option<Vec<Option<Vec<u8>>>> {
+    if !valid_term(term) {
         return None;
     }
     let mut dirs = Vec::<PathBuf>::new();
@@ -240,6 +233,13 @@ fn find_entry(term: &str) -> Option<Vec<Option<Vec<u8>>>> {
     ] {
         dirs.push(path.into());
     }
+    find_entry_in(term, &dirs)
+}
+#[cfg(not(windows))]
+fn find_entry_in(term: &str, dirs: &[PathBuf]) -> Option<Vec<Option<Vec<u8>>>> {
+    if !valid_term(term) {
+        return None;
+    }
     for dir in dirs {
         let first = term.as_bytes()[0];
         for subdir in [
@@ -259,10 +259,16 @@ fn find_entry(term: &str) -> Option<Vec<Option<Vec<u8>>>> {
 }
 #[cfg(not(windows))]
 fn read_limited(path: &Path) -> std::io::Result<Vec<u8>> {
-    if fs::metadata(path)?.len() > 1024 * 1024 {
-        return Err(std::io::Error::other("terminfo entry too large"));
+    use std::io::Read;
+    const LIMIT: u64 = 1024 * 1024;
+    let mut bytes = Vec::new();
+    fs::File::open(path)?
+        .take(LIMIT + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > LIMIT {
+        return Err(io::Error::other("terminfo entry too large"));
     }
-    fs::read(path)
+    Ok(bytes)
 }
 #[cfg(any(not(windows), test))]
 pub(crate) fn parse_entry(bytes: &[u8]) -> Option<Vec<Option<Vec<u8>>>> {
@@ -282,6 +288,12 @@ pub(crate) fn parse_entry(bytes: &[u8]) -> Option<Vec<Option<Vec<u8>>>> {
     let ints = n(bytes, 6)?;
     let count = n(bytes, 8)?;
     let strings = n(bytes, 10)?;
+    if [names, bools, ints, count, strings]
+        .iter()
+        .any(|n| *n > i16::MAX as usize)
+    {
+        return None;
+    }
     let offsets_at = 12usize
         .checked_add(names)?
         .checked_add(bools)?
@@ -300,9 +312,8 @@ pub(crate) fn parse_entry(bytes: &[u8]) -> Option<Vec<Option<Vec<u8>>>> {
             continue;
         }
         let start = table_at.checked_add(off)?;
-        if start >= end {
-            result.push(None);
-            continue;
+        if off > i16::MAX as usize || start >= end {
+            return None;
         }
         let len = bytes[start..end].iter().position(|b| *b == 0)?;
         result.push(Some(bytes[start..start + len].to_vec()));
@@ -310,91 +321,4 @@ pub(crate) fn parse_entry(bytes: &[u8]) -> Option<Vec<Option<Vec<u8>>>> {
     Some(result)
 }
 #[cfg(test)]
-mod tests {
-    use super::*;
-    fn decode_fixture(hex: &str) -> Vec<u8> {
-        let digits: Vec<u8> = hex.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
-        digits
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
-            .collect()
-    }
-    #[test]
-    fn parses_binary_entry() {
-        // Header: 0 names, 0 bools, 0 nums, 2 strings, 4 string bytes.
-        let bytes = [
-            0x1a, 0x01, 0, 0, 0, 0, 0, 0, 2, 0, 4, 0, 0, 0, 2, 0, b'a', 0, b'b', 0,
-        ];
-        let caps = parse_entry(&bytes).unwrap();
-        assert_eq!(caps[0], Some(b"a".to_vec()));
-        assert_eq!(caps[1], Some(b"b".to_vec()));
-    }
-    #[test]
-    fn fixture_missing_capabilities_stay_missing() {
-        let bytes = decode_fixture(include_str!("../../tests/fixtures/minimal-terminfo.hex"));
-        let entry = parse_entry(&bytes).unwrap();
-        let caps = Capabilities::from_entry(&entry);
-        assert_eq!(caps.clear, b"\x1b[2J");
-        assert!(caps.show_cursor.is_empty());
-        assert!(caps.reset.is_empty());
-    }
-    #[test]
-    fn cursor_capability_fixture_expands_row_and_column() {
-        let bytes = decode_fixture(include_str!("../../tests/fixtures/cursor-terminfo.hex"));
-        let entry = parse_entry(&bytes).unwrap();
-        let caps = Capabilities::from_entry(&entry);
-        assert_eq!(caps.cursor_position(9, 4).unwrap(), b"\x1b[5;10H");
-    }
-    #[test]
-    fn rejects_corruption() {
-        assert!(parse_entry(&[0; 12]).is_none());
-    }
-    #[test]
-    fn valid_entry_does_not_inherit_builtin_capabilities() {
-        let mut entry = vec![None; 40];
-        entry[5] = Some(b"clear".to_vec());
-        let caps = Capabilities::from_entry(&entry);
-        assert_eq!(caps.clear, b"clear");
-        assert!(caps.enter_screen.is_empty());
-        assert!(caps.show_cursor.is_empty());
-        assert!(caps.keys.is_empty());
-    }
-    #[test]
-    fn arbitrary_terminfo_bytes_do_not_panic() {
-        let mut state = 0x517cc1b727220a95u64;
-        for len in 0..512 {
-            let mut bytes = vec![0; len];
-            for byte in &mut bytes {
-                state ^= state << 13;
-                state ^= state >> 7;
-                state ^= state << 17;
-                *byte = state as u8;
-            }
-            let _ = parse_entry(&bytes);
-        }
-    }
-    #[test]
-    fn builtin_families_use_distinct_reference_sequences() {
-        assert!(Capabilities::builtin("linux").enter_screen.is_empty());
-        assert!(
-            Capabilities::builtin("tmux-256color")
-                .keys
-                .iter()
-                .any(|(s, k)| s == b"\x1bOP" && *k == Key::Function(1))
-        );
-        assert!(
-            Capabilities::builtin("rxvt-unicode")
-                .keys
-                .iter()
-                .any(|(s, k)| s == b"\x1b[11~" && *k == Key::Function(1))
-        );
-        assert!(
-            !Capabilities::builtin("Eterm")
-                .keys
-                .iter()
-                .any(|(_, k)| *k == Key::BackTab)
-        );
-    }
-}
+mod tests;

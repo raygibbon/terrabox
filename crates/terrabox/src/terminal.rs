@@ -448,7 +448,7 @@ mod tests {
     #[test]
     fn colour_and_attribute_sequences() {
         let mut out = Vec::new();
-        let caps = Capabilities::builtin("xterm");
+        let caps = Capabilities::fallback("xterm").unwrap();
         let style = Style {
             foreground: Color::Indexed(9),
             background: Color::Rgb(1, 2, 3),
@@ -457,25 +457,25 @@ mod tests {
             ..Style::default()
         };
         append_style(&mut out, style, &caps);
-        assert_eq!(out, b"\x1b(B\x1b[m\x1b[91;48;2;1;2;3m\x1b[3m\x1b[9m");
+        assert_eq!(out, b"\x1b[0m\x1b[91;48;2;1;2;3m\x1b[3m\x1b[9m");
         out.clear();
         append_style(
             &mut out,
             Style::new(Color::Indexed(5), Color::Default),
             &caps,
         );
-        assert_eq!(out, b"\x1b(B\x1b[m\x1b[35m");
+        assert_eq!(out, b"\x1b[0m\x1b[35m");
         out.clear();
         append_style(
             &mut out,
             Style::new(Color::Indexed(234), Color::Default),
             &caps,
         );
-        assert_eq!(out, b"\x1b(B\x1b[m\x1b[38;5;234m");
+        assert_eq!(out, b"\x1b[0m\x1b[38;5;234m");
     }
     #[test]
     fn cursor_sequence_follows_rendering() {
-        let caps = Capabilities::builtin("xterm");
+        let caps = Capabilities::fallback("xterm").unwrap();
         let mut out = b"\x1b[3;1Hdrawn".to_vec();
         append_cursor(&mut out, Some(Position { x: 10, y: 5 }), &caps).unwrap();
         assert!(out.ends_with(&[b"\x1b[6;11H".as_slice(), caps.show_cursor.as_slice()].concat()));
