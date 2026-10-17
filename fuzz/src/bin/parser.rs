@@ -1,6 +1,6 @@
 //! Feed bytes from stdin; suitable for a process-based Rust fuzzing engine.
 use std::io::{self, Read};
-use terra_term::{InputParser, Key};
+use terrabox::{InputParser, Key};
 
 fn main() -> io::Result<()> {
     let mut input = Vec::new();

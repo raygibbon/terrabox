@@ -1,5 +1,11 @@
 # v0.1.0 release checklist
 
+This checklist records the pre-workspace engine release baseline, not final
+approval of the new framework. See `docs/validation.md` for current results.
+For a new release, rerun workspace checks and `cargo package --workspace` from
+a clean checkout/snapshot. Publish TerraBox before TerraTUI. Native Windows
+interactive and macOS validation remain required before claiming those hosts.
+
 Scope: synchronous terminal rendering and input/events with native Unix/Windows backends. No widgets, layout engine, app framework, or async runtime.
 
 Linux automated validation passed on 2026-10-03, including 57 tests and one doctest. Windows GNU cross-check and Clippy also passed; native Windows execution and interactive sign-off remain pending.

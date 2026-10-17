@@ -1,0 +1,17 @@
+[package]
+name = "terratui"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "A retained framework for keyboard-driven terminal applications"
+repository = "https://github.com/raygibbon/terrabox"
+readme = "README.md"
+keywords = ["terminal", "tui", "application"]
+categories = ["command-line-interface"]
+
+[dependencies]
+terrabox = { version = "0.1.0", path = "../terrabox" }
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"
+

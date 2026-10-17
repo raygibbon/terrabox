@@ -1,8 +1,8 @@
 [package]
-name = "terra-term-fuzz"
+name = "terrabox-fuzz"
 version = "0.0.0"
 edition = "2024"
 publish = false
 
 [dependencies]
-terra-term = { path = ".." }
+terrabox = { path = "../crates/terrabox" }

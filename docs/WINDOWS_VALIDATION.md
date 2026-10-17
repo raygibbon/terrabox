@@ -1,5 +1,10 @@
 # Windows 0.1.0 release validation
 
+Workspace migration note (2026-10-17): this is a historical report. Engine
+paths now start at `crates/terrabox/`; use `cargo test -p terrabox --lib` when
+running the host library tests. `tools/windows-console-test.ps1` selects that
+crate explicitly. Current migration checks are in [validation](validation.md).
+
 Validation date: 2026-09-18, Australia/Adelaide. Scope: native Windows and shared Rust. No other OS backend was changed or tested.
 
 Implementation notes updated on 2026-10-03: wheel events now use semantic directions, accumulate partial deltas per axis, and emit one event per notch. The host results below are historical; this hardening pass was run on Linux and does not renew native Windows sign-off.
@@ -94,7 +99,7 @@ Manual diagnostic tooling is retained in the repository (not the crate package):
 
 - tools/windows-console-test.ps1 runs attached API checks.
 - tools/windows-interactive.ps1 runs the existing input, Unicode, colors, resize and lifecycle examples and records the operator's actual observations.
-- examples/input.rs can log observed events using TERRA_TERM_INPUT_LOG.
+- examples/input.rs can log observed events using TERRABOX_INPUT_LOG.
 
 The Windows Terminal interactive runner was launched. Its observation array remained empty when the user requested finishing. No physical keyboard/mouse or visual result is claimed. Classic Console Host was tested automatically; its human interactive pass remains unverified. These are the remaining release acceptance items, not failed automated tests.
 
@@ -108,6 +113,6 @@ Changed areas: src/event.rs and parser regression tests; src/platform/windows.rs
 
 Human visual/input sign-off is outstanding. Windows 10, ARM64, alternate keyboard layouts/IME, physical F13-F24 and font fallback were not verified. Legacy screen-read APIs are not proof of supplementary glyph rendering. GetConsoleCursorInfo's alternate-buffer behavior requires visibility checks on the main screen. Resize API tests deliberately leave the alternate buffer because SetConsoleWindowInfo targets the main buffer; user-driven resizing during alternate-screen drawing remains a manual check.
 
-Applications must coordinate other console users. Another application handler installed later can intercept control signals before terra-term. Detaching the console resets handlers. While suspended, normal application/Windows Ctrl+Break behavior applies. Forced termination and aborting panics bypass Drop. Screen recovery after a failed output write is best effort.
+Applications must coordinate other console users. Another application handler installed later can intercept control signals before terrabox. Detaching the console resets handlers. While suspended, normal application/Windows Ctrl+Break behavior applies. Forced termination and aborting panics bypass Drop. Screen recovery after a failed output write is best effort.
 
 References: [console modes](https://learn.microsoft.com/en-us/windows/console/setconsolemode), [Ctrl+C and Ctrl+Break](https://learn.microsoft.com/en-us/windows/console/ctrl-c-and-ctrl-break-signals), [control handler lifetime](https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler), [mouse records](https://learn.microsoft.com/en-us/windows/console/mouse-event-record-str).

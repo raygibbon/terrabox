@@ -1,4 +1,4 @@
-# terra-term features
+# terrabox features
 
 | Capability | Status | Detail |
 |---|---|---|

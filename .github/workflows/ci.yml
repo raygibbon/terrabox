@@ -10,12 +10,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - run: cargo fmt --check
-      - run: cargo check --all-targets
-      - run: cargo test
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo build --release
+      - run: cargo fmt --all --check
+      - run: cargo check --workspace --all-targets
+      - run: cargo test --workspace
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo build --workspace --release
       - run: cargo check --manifest-path fuzz/Cargo.toml --all-targets
+      - run: cargo build -p terratui --example desktop
+      - run: python3 tools/desktop-smoke.py
   windows:
     runs-on: windows-latest
     steps:
@@ -23,12 +25,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - run: cargo fmt --check
-      - run: cargo check --all-targets
-      - run: cargo test --all-targets
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo doc --no-deps
-      - run: cargo test --doc
-      - run: cargo build --release
-      - run: cargo package
-      - run: cargo publish --dry-run
+      - run: cargo fmt --all --check
+      - run: cargo check --workspace --all-targets
+      - run: cargo test --workspace --all-targets
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo doc --workspace --no-deps
+      - run: cargo test --workspace --doc
+      - run: cargo build --workspace --release
+      - run: cargo package --workspace
+      - run: cargo publish -p terrabox --dry-run

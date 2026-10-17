@@ -1,7 +1,7 @@
 //! Feed a compiled terminfo entry from stdin without using the host database.
 use std::io::{self, Read};
-pub use terra_term::Key;
-#[path = "../../../src/terminfo/mod.rs"]
+pub use terrabox::Key;
+#[path = "../../../crates/terrabox/src/terminfo/mod.rs"]
 #[allow(dead_code)]
 mod terminfo;
 

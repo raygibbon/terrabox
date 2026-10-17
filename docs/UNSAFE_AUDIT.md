@@ -1,6 +1,6 @@
 # Unsafe Rust audit
 
-The library exposes a safe public API. Unsafe code is confined to `src/platform/unix.rs` and `src/platform/windows.rs`; the input parser, terminfo parser, and renderer use safe Rust.
+The library exposes a safe public API. Unsafe code is confined to `crates/terrabox/src/platform/unix.rs` and `crates/terrabox/src/platform/windows.rs`; the input parser, terminfo parser, and renderer use safe Rust.
 
 ## Unix
 
@@ -24,7 +24,7 @@ Tests use `CREATE_NEW_CONSOLE`, verify attachment via `GetConsoleProcessList`, a
 
 ## Remaining risk
 
-Signal ownership is process global. Code outside terra-term that replaces SIGWINCH while a `Terminal` exists may have its handler overwritten during restoration. On Windows, unrelated code or another process attached to the same console can still change console-global modes/code pages or consume its input. The lease coordinates this crate's terminal instances only. Forced process termination, aborting panics, or detaching the console cannot guarantee restoration.
+Signal ownership is process global. Code outside terrabox that replaces SIGWINCH while a `Terminal` exists may have its handler overwritten during restoration. On Windows, unrelated code or another process attached to the same console can still change console-global modes/code pages or consume its input. The lease coordinates this crate's terminal instances only. Forced process termination, aborting panics, or detaching the console cannot guarantee restoration.
 
 ## Foreground child API (2026-10-06)
 

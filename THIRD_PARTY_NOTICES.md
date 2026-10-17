@@ -1,6 +1,6 @@
 # Third-party notices
 
-The built-in terminal capability tables in `src/terminfo/builtins.rs` retain sequence data adapted from the termbox2 header. The implementation, parser, terminal backends, and public API are Rust code developed for terra-term. The adapted tables remain under the source project's MIT terms below.
+The built-in terminal capability tables in `crates/terrabox/src/terminfo/builtins.rs` retain sequence data adapted from the termbox2 header. The implementation, parser, terminal backends, and public API are Rust code developed for terrabox. The adapted tables remain under the source project's MIT terms below.
 
 MIT License
 

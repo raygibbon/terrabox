@@ -5,14 +5,14 @@ $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
 $ReportPath = [System.IO.Path]::GetFullPath($ReportPath)
 'RUNNING' | Set-Content -Encoding utf8 $ReportPath
-$artifacts = & cargo test --lib --no-run --message-format=json
+$artifacts = & cargo test -p terrabox --lib --no-run --message-format=json
 if ($LASTEXITCODE -ne 0) { throw 'Could not build the native console tests.' }
 $binary = $artifacts | ForEach-Object { $_ | ConvertFrom-Json } |
     Where-Object { $_.reason -eq 'compiler-artifact' -and $_.profile.test -and $_.executable } |
     Select-Object -First 1 -ExpandProperty executable
 if (-not $binary) { throw 'No library test executable found.' }
-$env:TERRA_TERM_CONSOLE_TEST = 'attached'
-$env:TERRA_TERM_CONSOLE_REPORT = $ReportPath
+$env:TERRABOX_CONSOLE_TEST = 'attached'
+$env:TERRABOX_CONSOLE_REPORT = $ReportPath
 [ordered]@{
     Date = (Get-Date -Format o)
     Windows = [Environment]::OSVersion.VersionString

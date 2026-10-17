@@ -1,44 +1,66 @@
-# terra-term
+# TerraBox + TerraTUI
 
-terra-term is a small, low-level, cell-oriented terminal library written entirely in Rust. It manages terminal initialization and restoration, raw input, an alternate screen, buffered cell rendering, Unicode graphemes, keyboard and mouse events, bracketed paste, resize events, colours, and terminal capabilities. It has native Unix and Windows backends.
+A Rust terminal engine and application framework in one Cargo workspace,
+evolved from terra-term with its existing history and native backends intact.
 
-```rust
-use terra_term::{Event, Key, Style, Terminal};
+| Crate | Responsibility |
+|---|---|
+| `terrabox` | Terminal lifecycle, input, grapheme cells, changed-row rendering, clipped surfaces and region scrolling |
+| `terratui` | Retained applications, commands, focus, nested splits, panels, menu bar, modal dialogs, status and timers |
 
-fn main() -> std::io::Result<()> {
-    let mut terminal = Terminal::new()?;
-    loop {
-        terminal.clear();
-        terminal.put_str(2, 2, "Hello", Style::default());
-        terminal.present()?;
-        if matches!(terminal.read_event()?, Event::Key(key) if key.key == Key::Escape) {
-            break;
-        }
-    }
-    Ok(())
-}
+TerraBox is independently usable. TerraTUI depends on TerraBox and reuses its
+cells, styles, input and rendering. Neither requires an async runtime or GUI.
+Files, documents, syntax, providers and application operations stay in consumers.
+
+## Run
+
+```sh
+cargo run -p terratui --example desktop
+cargo run -p terrabox --example hello
 ```
 
-`Terminal::new()` opens the controlling terminal (`/dev/tty`) on Unix. It works when process stdout is redirected if a controlling terminal exists. `from_stdio()` uses process stdin and stdout explicitly; `from_fds()` accepts owned terminal descriptors. The terminal restores its previous mode on drop. `suspend()` and `resume()` allow temporary use of the normal screen; resume retains cells when the size is unchanged and clears them after a resize. Only one `Terminal` may exist per process, including while suspended. Restoration runs on normal drop and unwinding panics; aborts and forced termination bypass it. Applications must coordinate other code that changes terminal modes or signal handlers.
+In the desktop demo: Tab/Shift-Tab switch panels, arrow/page keys navigate,
+F10 opens the command menu, F1 opens a modal, Enter/Escape closes it, and Ctrl+Q
+quits. Resizing reflows the layout. Idle applications block for input; timers
+and redraws run only on request. The menu MVP is a horizontal command menu;
+pull-down menus and composite input widgets are follow-up work.
 
-Drawing changes the back buffer. `present()` writes changed rows and restores the logical cursor position and visibility. `Cell::grapheme` stores a cluster; `put_str` segments text into clusters. `Color::Indexed(0..=15)` selects standard and bright colours, `Indexed(16..=255)` selects the extended palette, and `Rgb` selects true colour. Bold is a separate style attribute. `set_clear_style()` controls subsequent clears.
+## Use the libraries
 
-`read_event()` blocks, `read_event_timeout()` waits for a duration, and `try_event()` checks immediately. `InputMode::Escape` reports an unrecognized Escape separately; `InputMode::Alt` combines it with the following key. A lone Escape uses a 30 ms ambiguity period. Incomplete escape sequences, including Alt plus truncated UTF-8, expire after 500 ms as `UnknownSequence`. Paste data arrives in bounded chunks with a completion flag. Unix and Windows normalize control-key aliases where their input sources permit it. Raw Unix Ctrl+C is delivered as a key rather than a process signal.
+For a sibling checkout, depend on `../terrabox/crates/terrabox` or
+`../terrabox/crates/terratui`. Imports use `terrabox` and `terratui`.
+Each crate has its own version and manifest. Publish TerraBox before TerraTUI,
+whose dependency includes both a local path and registry version.
 
-`InputParser::add_key_sequence()` returns `Result<(), SequenceRegistrationError>` for explicit registration validation. Sequences must start with ESC, contain 2–64 bytes, and are matched longest first. Empty, oversized, non-ESC, and lone-ESC registrations return errors without changing existing registrations. Conflicting duplicate mappings produce `UnknownSequence`; repeating the same mapping is harmless. Bracketed-paste opening delimiters take precedence. `feed()` queues caller-supplied bytes, so drain events between bounded feeds; paste payload and unknown-sequence events are bounded to 1 MiB and 64 bytes respectively.
+Engine source, tests and examples live under `crates/terrabox/`; framework
+source, tests and the desktop demo live under `crates/terratui/`. Test fixtures
+and licence files travel with their crate for packaging. `fuzz/` is a separate
+workspace referencing the engine and retains its own lockfile.
 
-terra-term is synchronous and ends at the terminal abstraction. It is not a widget framework, layout engine, application framework, or async runtime. See [features](docs/FEATURES.md) for platform details and current limits.
+## Validate
 
-On Windows, use a console attached to stdin and stdout (Windows Terminal is recommended). Redirected streams are rejected. The backend owns duplicate console handles and permits one `Terminal` per process, including while suspended. Native C0 characters use the shared normalization: Ctrl+H is Backspace, Ctrl+I is Tab, Ctrl+J/Ctrl+M are Enter, and Ctrl+[ is Escape. Ctrl+\\ is `Char('\\')` with Ctrl. Ctrl+C arrives as a key; Ctrl+Break is consumed as a Windows signal while active, with no key event. Suspend/drop removes that signal handler. `InputMode` affects the byte parser, not native console records. Paste arrives as key records. See the [Windows validation report](docs/WINDOWS_VALIDATION.md) for tested hosts, build commands, and native input details.
+```sh
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo build --workspace
+cargo check --manifest-path fuzz/Cargo.toml --all-targets
+```
 
-Build with `cargo build` using a normal Rust toolchain. No C compiler, terminal development headers, or external terminal utility is required. The crate is MIT licensed; adapted built-in terminal sequence data retains its required notice in [third-party notices](THIRD_PARTY_NOTICES.md).
+Linux has PTY regression tests. Windows has native console support and host
+validation scripts; cross-compilation alone does not verify console behaviour.
+macOS native validation remains pending. See [validation](docs/validation.md)
+for this migration's exact results. Kitty graphics and advanced animations are
+planned, not implemented; no graphics support is assumed or probed by default.
 
-### Foreground child lifecycle
+## Design and integration
 
-`Terminal::run_command(&mut std::process::Command)` suspends terminal modes, runs
-a child on the real terminal, waits, resumes and requests a full redraw. Unix
-attaches controlling-terminal descriptors and transfers foreground process-group
-ownership so Ctrl+C targets the child; Windows uses a temporary parent-only
-console interrupt handler. Spawn/wait and restoration errors propagate. TDX's
-PTY suite covers normal/nonzero exits, failed spawn, Ctrl+C and resize. A stopped
-child (for example Ctrl+Z without resumption) is not a job-management UI.
+- [Repository audit and ownership matrix](docs/architecture-review.md)
+- [Architecture and graphics integration plan](docs/architecture.md)
+- [MVP and future roadmap](docs/roadmap.md)
+- [Engine guide](docs/ENGINE.md) and [capabilities](docs/FEATURES.md)
+- [Framework usage](docs/TERRATUI.md)
+- [Windows validation](docs/WINDOWS_VALIDATION.md)
+
+MIT licensed. Adapted termbox2 capability tables retain their
+[third-party notice](THIRD_PARTY_NOTICES.md).

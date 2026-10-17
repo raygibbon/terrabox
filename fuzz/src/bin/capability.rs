@@ -1,6 +1,6 @@
 //! Feed a parameterized cursor capability from stdin.
 use std::io::{self, Read};
-#[path = "../../../src/terminfo/expand.rs"]
+#[path = "../../../crates/terrabox/src/terminfo/expand.rs"]
 mod expand;
 
 fn main() -> io::Result<()> {
