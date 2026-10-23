@@ -200,7 +200,7 @@ fn main() -> io::Result<()> {
                         else { clock.resume(Instant::now()); }
                     }
                     Key::Char('r' | 'R') if game.ended => {
-                        game = Snake::new(seed ^ (game.score as u64).wrapping_add(Instant::now().elapsed().as_nanos() as u64).wrapping_add(game.body.len() as u64));
+                        game = Snake::new(seed ^ SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos() as u64);
                         clock.resume(Instant::now());
                     }
                     _ => {}
